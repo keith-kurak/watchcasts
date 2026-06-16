@@ -2,6 +2,7 @@ package dev.podcatch.app.modules
 
 import android.util.Log
 import com.google.android.gms.wearable.Node
+import com.google.android.gms.wearable.PutDataMapRequest
 import com.google.android.gms.wearable.Wearable
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -14,35 +15,18 @@ class WearDataLayerModule : Module() {
         AsyncFunction("syncSubscriptions") { json: String, promise: Promise ->
             val context = appContext.reactContext
                 ?: return@AsyncFunction promise.reject("ERR", "No context", null)
-            val messageClient = Wearable.getMessageClient(context)
-            val nodeClient = Wearable.getNodeClient(context)
-            val payload = json.toByteArray(Charsets.UTF_8)
-
-            nodeClient.connectedNodes
-                .addOnSuccessListener { nodes: MutableList<Node> ->
-                    if (nodes.isEmpty()) {
-                        promise.reject("ERR", "No connected watch nodes", null)
-                        return@addOnSuccessListener
-                    }
-                    var sent = 0
-                    var failed = false
-                    for (node in nodes) {
-                        messageClient.sendMessage(node.id, PATH_SUBSCRIPTIONS, payload)
-                            .addOnSuccessListener {
-                                sent++
-                                Log.d(TAG, "Sent subscriptions to ${node.displayName}")
-                                if (sent == nodes.size) promise.resolve(null)
-                            }
-                            .addOnFailureListener { e ->
-                                if (!failed) {
-                                    failed = true
-                                    promise.reject("ERR", e.message ?: "sendMessage failed", e)
-                                }
-                            }
-                    }
+            val dataClient = Wearable.getDataClient(context)
+            val request = PutDataMapRequest.create(PATH_SUBSCRIPTIONS).apply {
+                dataMap.putString(KEY_ITEMS, json)
+                dataMap.putLong(KEY_UPDATED_AT, System.currentTimeMillis())
+            }.asPutDataRequest().setUrgent()
+            dataClient.putDataItem(request)
+                .addOnSuccessListener {
+                    Log.d(TAG, "Subscriptions synced to Data Layer")
+                    promise.resolve(null)
                 }
                 .addOnFailureListener { e ->
-                    promise.reject("ERR", e.message ?: "getConnectedNodes failed", e)
+                    promise.reject("ERR", e.message ?: "putDataItem failed", e)
                 }
         }
 
@@ -66,5 +50,7 @@ class WearDataLayerModule : Module() {
     companion object {
         private const val TAG = "WearDataLayer"
         private const val PATH_SUBSCRIPTIONS = "/podcatch/subscriptions"
+        private const val KEY_ITEMS = "items"
+        private const val KEY_UPDATED_AT = "updatedAt"
     }
 }

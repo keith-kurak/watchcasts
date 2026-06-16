@@ -20,14 +20,16 @@ import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.Scaffold
 import androidx.wear.compose.material.Text
 import androidx.wear.compose.material.TimeText
-import com.google.android.gms.wearable.MessageClient
-import com.google.android.gms.wearable.MessageEvent
+import com.google.android.gms.wearable.DataClient
+import com.google.android.gms.wearable.DataEvent
+import com.google.android.gms.wearable.DataEventBuffer
+import com.google.android.gms.wearable.DataMapItem
 import com.google.android.gms.wearable.Wearable
 import dev.podcatch.app.data.DataLayerContract
 import dev.podcatch.app.data.SyncedSubscriptions
 import dev.podcatch.app.presentation.theme.PodcatchTheme
 
-class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListener {
+class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
@@ -37,21 +39,37 @@ class MainActivity : ComponentActivity(), MessageClient.OnMessageReceivedListene
 
     override fun onResume() {
         super.onResume()
-        Log.d(TAG, "onResume: registering message listener")
-        Wearable.getMessageClient(this).addListener(this)
+        Wearable.getDataClient(this).addListener(this)
+        // Read any data that was replicated before we started listening
+        Wearable.getDataClient(this)
+            .getDataItems()
+            .addOnSuccessListener { items ->
+                for (item in items) {
+                    if (item.uri.path == DataLayerContract.PATH_SUBSCRIPTIONS) {
+                        val dataMap = DataMapItem.fromDataItem(item).dataMap
+                        val json = dataMap.getString(DataLayerContract.KEY_ITEMS)
+                        Log.d(TAG, "Read existing subscriptions from Data Layer")
+                        SyncedSubscriptions.update(json)
+                    }
+                }
+                items.release()
+            }
     }
 
     override fun onPause() {
-        Wearable.getMessageClient(this).removeListener(this)
+        Wearable.getDataClient(this).removeListener(this)
         super.onPause()
     }
 
-    override fun onMessageReceived(messageEvent: MessageEvent) {
-        Log.d(TAG, "Message received: ${messageEvent.path}")
-        if (messageEvent.path == DataLayerContract.PATH_SUBSCRIPTIONS) {
-            val json = String(messageEvent.data, Charsets.UTF_8)
-            Log.d(TAG, "Subscriptions received: $json")
-            SyncedSubscriptions.update(json)
+    override fun onDataChanged(events: DataEventBuffer) {
+        for (event in events) {
+            if (event.type != DataEvent.TYPE_CHANGED) continue
+            if (event.dataItem.uri.path == DataLayerContract.PATH_SUBSCRIPTIONS) {
+                val dataMap = DataMapItem.fromDataItem(event.dataItem).dataMap
+                val json = dataMap.getString(DataLayerContract.KEY_ITEMS)
+                Log.d(TAG, "Live data change: subscriptions updated")
+                SyncedSubscriptions.update(json)
+            }
         }
     }
 
