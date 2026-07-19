@@ -3,7 +3,7 @@ import { useLocalSearchParams, Stack } from 'expo-router';
 import { EpisodeDetail } from '@/components/episode-detail';
 import { getCachedEpisodes } from '@/lib/storage';
 
-export default function QueueEpisodeDetailScreen() {
+export default function DownloadEpisodeDetailScreen() {
   const { episodeId, podcastId } = useLocalSearchParams<{
     episodeId: string;
     podcastId: string;

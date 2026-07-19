@@ -4,7 +4,7 @@ import { SymbolView } from 'expo-symbols';
 import { useRef } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
-import { QueueToggle } from '@/components/queue-toggle';
+import { DownloadToggle } from '@/components/download-toggle';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { WatchToggle } from '@/components/watch-toggle';
@@ -12,6 +12,7 @@ import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAudio } from '@/lib/audio-context';
 import { formatDate, formatDuration, parseDurationToSeconds, stripHtml } from '@/lib/format';
+import { useIsInDownloads } from '@/lib/queries';
 import { getCachedEpisodes, getSubscriptions } from '@/lib/storage';
 import type { Episode, Podcast } from '@/lib/types';
 
@@ -35,6 +36,7 @@ export function EpisodeDetail({ episodeId, podcastId }: EpisodeDetailProps) {
   const { player, currentEpisode, play, pause, resume } = useAudio();
   const status = useAudioPlayerStatus(player);
   const theme = useTheme();
+  const { data: downloadItem } = useIsInDownloads(episodeId);
 
   if (!episode) {
     return (
@@ -53,13 +55,16 @@ export function EpisodeDetail({ episodeId, podcastId }: EpisodeDetailProps) {
   const currentTime = isThisEpisode ? status.currentTime : 0;
   const progress = activeDuration > 0 ? currentTime / activeDuration : 0;
 
+  const isDownloaded = downloadItem?.status === 'complete';
+  const canPlay = isDownloaded || isThisEpisode;
+
   function handlePlayPause() {
     if (!podcast) return;
     if (isThisEpisode) {
       if (status.playing) pause();
       else resume();
-    } else {
-      play(episode!, podcast);
+    } else if (isDownloaded) {
+      play(episode!, podcast, downloadItem?.localPath);
     }
   }
 
@@ -72,7 +77,7 @@ export function EpisodeDetail({ episodeId, podcastId }: EpisodeDetailProps) {
         <View style={styles.titleRow}>
           <ThemedText style={styles.title}>{episode.title}</ThemedText>
           <WatchToggle podcastId={podcastId} episodeGuid={episode.guid} />
-          <QueueToggle podcastId={podcastId} episodeGuid={episode.guid} />
+          <DownloadToggle podcastId={podcastId} episodeGuid={episode.guid} audioUrl={episode.audioUrl} />
         </View>
         <View style={styles.meta}>
           {episode.pubDate && (
@@ -87,7 +92,7 @@ export function EpisodeDetail({ episodeId, podcastId }: EpisodeDetailProps) {
           )}
         </View>
 
-        {episode.audioUrl && (
+        {(canPlay || episode.audioUrl) && (
           <PlaybackControls
             isPlaying={isPlaying}
             progress={progress}
@@ -98,6 +103,7 @@ export function EpisodeDetail({ episodeId, podcastId }: EpisodeDetailProps) {
               if (isThisEpisode) await player.seekTo(seconds);
             }}
             theme={theme}
+            disabled={!canPlay && !isThisEpisode}
           />
         )}
 
@@ -119,6 +125,7 @@ function PlaybackControls({
   onPlayPause,
   onSeek,
   theme,
+  disabled,
 }: {
   isPlaying: boolean;
   progress: number;
@@ -127,12 +134,13 @@ function PlaybackControls({
   onPlayPause: () => void;
   onSeek: (seconds: number) => Promise<void>;
   theme: ReturnType<typeof useTheme>;
+  disabled?: boolean;
 }) {
   const progressBarWidth = useRef<number>(0);
 
   return (
     <View style={styles.controls}>
-      <Pressable onPress={onPlayPause} style={styles.playButton} hitSlop={8}>
+      <Pressable onPress={onPlayPause} style={[styles.playButton, disabled && { opacity: 0.4 }]} hitSlop={8} disabled={disabled}>
         <View pointerEvents="none">
           <SymbolView
             name={

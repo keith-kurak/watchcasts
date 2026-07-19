@@ -9,7 +9,7 @@ import { WatchToggle } from '@/components/watch-toggle';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { formatDate, formatDuration } from '@/lib/format';
-import { useWatchListQuery, type EnrichedQueueItem } from '@/lib/queries';
+import { useWatchListQuery, type EnrichedDownloadItem } from '@/lib/queries';
 import { getSubscriptions } from '@/lib/storage';
 import { getConnectedNodes } from '@/hooks/useWearDataLayer';
 
@@ -28,7 +28,7 @@ export default function WatchScreen() {
     getConnectedNodes().then((nodes) => setConnected(nodes.length > 0));
   }, []);
 
-  function renderItem({ item }: { item: EnrichedQueueItem }) {
+  function renderItem({ item }: { item: EnrichedDownloadItem }) {
     return (
       <Pressable
         style={styles.episodeRow}

@@ -2,7 +2,7 @@ import { Image } from 'expo-image';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 
-import { QueueToggle } from '@/components/queue-toggle';
+import { DownloadToggle } from '@/components/download-toggle';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
@@ -62,7 +62,7 @@ export default function PodcastScreen() {
                 )}
               </View>
             </View>
-            <QueueToggle podcastId={id} episodeGuid={item.guid} />
+            <DownloadToggle podcastId={id} episodeGuid={item.guid} audioUrl={item.audioUrl} />
           </Pressable>
         )}
         ListEmptyComponent={

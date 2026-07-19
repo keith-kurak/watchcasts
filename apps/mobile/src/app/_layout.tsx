@@ -5,6 +5,7 @@ import { useColorScheme } from 'react-native';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { AudioProvider } from '@/lib/audio-context';
+import { DownloadProvider } from '@/lib/download-context';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -18,6 +19,7 @@ export default function RootLayout() {
   const colorScheme = useColorScheme();
   return (
     <QueryClientProvider client={queryClient}>
+      <DownloadProvider>
       <AudioProvider>
         <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
           <AnimatedSplashOverlay />
@@ -26,6 +28,7 @@ export default function RootLayout() {
           </Stack>
         </ThemeProvider>
       </AudioProvider>
+      </DownloadProvider>
     </QueryClientProvider>
   );
 }

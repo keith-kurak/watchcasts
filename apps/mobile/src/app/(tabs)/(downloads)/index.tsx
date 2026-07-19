@@ -2,26 +2,26 @@ import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 
-import { QueueToggle } from '@/components/queue-toggle';
+import { DownloadToggle } from '@/components/download-toggle';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { formatDate, formatDuration } from '@/lib/format';
-import { useQueueQuery, type EnrichedQueueItem } from '@/lib/queries';
+import { useDownloadsQuery, type EnrichedDownloadItem } from '@/lib/queries';
 import { getSubscriptions } from '@/lib/storage';
 
-export default function QueueScreen() {
+export default function DownloadsScreen() {
   const router = useRouter();
   const subscriptions = getSubscriptions();
-  const { data: queue = [], isLoading, refetch, isRefetching } = useQueueQuery(subscriptions);
+  const { data: downloads = [], isLoading, refetch, isRefetching } = useDownloadsQuery(subscriptions);
 
-  function renderItem({ item }: { item: EnrichedQueueItem }) {
+  function renderItem({ item }: { item: EnrichedDownloadItem }) {
     return (
       <Pressable
         style={styles.episodeRow}
         onPress={() =>
           router.push({
-            pathname: '/(tabs)/(queue)/episode/[episodeId]',
+            pathname: '/(tabs)/(downloads)/episode/[episodeId]',
             params: { episodeId: item.episodeGuid, podcastId: item.podcastId },
           })
         }
@@ -36,7 +36,17 @@ export default function QueueScreen() {
             {item.episode.title}
           </ThemedText>
           <View style={styles.episodeMeta}>
-            {item.episode.pubDate && (
+            {item.status === 'downloading' && (
+              <ThemedText type="small" themeColor="textSecondary">
+                Downloading…
+              </ThemedText>
+            )}
+            {item.status === 'error' && (
+              <ThemedText type="small" style={{ color: '#FF3B30' }}>
+                Error
+              </ThemedText>
+            )}
+            {item.status === 'complete' && item.episode.pubDate && (
               <ThemedText type="small" themeColor="textSecondary">
                 {formatDate(item.episode.pubDate)}
               </ThemedText>
@@ -48,7 +58,11 @@ export default function QueueScreen() {
             )}
           </View>
         </View>
-        <QueueToggle podcastId={item.podcastId} episodeGuid={item.episodeGuid} />
+        <DownloadToggle
+          podcastId={item.podcastId}
+          episodeGuid={item.episodeGuid}
+          audioUrl={item.episode.audioUrl}
+        />
       </Pressable>
     );
   }
@@ -56,7 +70,7 @@ export default function QueueScreen() {
   return (
     <ThemedView style={styles.container}>
       <FlatList
-        data={queue}
+        data={downloads}
         keyExtractor={(item) => item.episodeGuid}
         refreshing={isRefetching}
         onRefresh={() => refetch()}
@@ -65,7 +79,7 @@ export default function QueueScreen() {
         ListEmptyComponent={
           isLoading ? null : (
             <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
-              Your queue is empty.
+              No downloads yet.
             </ThemedText>
           )
         }

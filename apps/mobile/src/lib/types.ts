@@ -17,9 +17,13 @@ export interface Episode {
   imageUrl?: string;
 }
 
-export interface QueueItem {
+export type DownloadStatus = 'pending' | 'downloading' | 'complete' | 'error';
+
+export interface DownloadItem {
   podcastId: string;
   episodeGuid: string;
+  status: DownloadStatus;
+  localPath?: string;
 }
 
 export interface WatchItem {

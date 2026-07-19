@@ -20,7 +20,7 @@ interface AudioContextValue {
   player: AudioPlayer;
   currentEpisode: Episode | null;
   currentPodcast: Podcast | null;
-  play: (episode: Episode, podcast: Podcast) => void;
+  play: (episode: Episode, podcast: Podcast, localUri?: string) => void;
   pause: () => void;
   resume: () => void;
   seekTo: (seconds: number) => Promise<void>;
@@ -66,10 +66,11 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
       player,
       currentEpisode: nowPlaying?.episode ?? null,
       currentPodcast: nowPlaying?.podcast ?? null,
-      play: async (episode: Episode, podcast: Podcast) => {
-        if (!episode.audioUrl) return;
+      play: async (episode: Episode, podcast: Podcast, localUri?: string) => {
+        const uri = localUri ?? episode.audioUrl;
+        if (!uri) return;
         clearPlayRetry();
-        player.replace({ uri: episode.audioUrl });
+        player.replace({ uri });
         player.play();
         setNowPlaying({ episode, podcast });
 

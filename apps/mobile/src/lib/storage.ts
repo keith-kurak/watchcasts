@@ -1,13 +1,20 @@
+import { Directory, File, Paths } from 'expo-file-system';
 import { Storage } from 'expo-sqlite/kv-store';
 
-import type { Episode, Podcast, QueueItem, WatchItem } from './types';
+import type { DownloadItem, Episode, Podcast, WatchItem } from './types';
 
 const SUBSCRIPTIONS_KEY = 'subscriptions';
-const QUEUE_KEY = 'queue';
+const DOWNLOADS_KEY = 'downloads';
 const WATCH_LIST_KEY = 'watchList';
 
 function episodesKey(podcastId: string) {
   return `episodes:${podcastId}`;
+}
+
+export const episodesDir = new Directory(Paths.document, 'episodes');
+
+export function getDownloadPath(episodeGuid: string): string {
+  return new File(episodesDir, `${episodeGuid}.mp3`).uri;
 }
 
 export function getSubscriptions(): Podcast[] {
@@ -42,26 +49,51 @@ export function setCachedEpisodes(
   Storage.setItemSync(episodesKey(podcastId), JSON.stringify(episodes));
 }
 
-export function getQueue(): QueueItem[] {
-  const raw = Storage.getItemSync(QUEUE_KEY);
+export function getDownloads(): DownloadItem[] {
+  const raw = Storage.getItemSync(DOWNLOADS_KEY);
   if (!raw) return [];
-  return JSON.parse(raw) as QueueItem[];
+  return JSON.parse(raw) as DownloadItem[];
 }
 
-export function addToQueue(podcastId: string, episodeGuid: string): void {
-  const queue = getQueue();
-  if (queue.some((q) => q.episodeGuid === episodeGuid)) return;
-  queue.push({ podcastId, episodeGuid });
-  Storage.setItemSync(QUEUE_KEY, JSON.stringify(queue));
+export function addToDownloads(podcastId: string, episodeGuid: string): void {
+  const downloads = getDownloads();
+  if (downloads.some((d) => d.episodeGuid === episodeGuid)) return;
+  downloads.push({ podcastId, episodeGuid, status: 'pending' });
+  Storage.setItemSync(DOWNLOADS_KEY, JSON.stringify(downloads));
 }
 
-export function removeFromQueue(episodeGuid: string): void {
-  const queue = getQueue().filter((q) => q.episodeGuid !== episodeGuid);
-  Storage.setItemSync(QUEUE_KEY, JSON.stringify(queue));
+export function updateDownloadItem(
+  episodeGuid: string,
+  updates: Partial<Pick<DownloadItem, 'status' | 'localPath'>>,
+): void {
+  const downloads = getDownloads();
+  const idx = downloads.findIndex((d) => d.episodeGuid === episodeGuid);
+  if (idx === -1) return;
+  downloads[idx] = { ...downloads[idx], ...updates };
+  Storage.setItemSync(DOWNLOADS_KEY, JSON.stringify(downloads));
 }
 
-export function isInQueue(episodeGuid: string): boolean {
-  return getQueue().some((q) => q.episodeGuid === episodeGuid);
+export function removeFromDownloads(episodeGuid: string): void {
+  const downloads = getDownloads();
+  const item = downloads.find((d) => d.episodeGuid === episodeGuid);
+  if (item?.localPath) {
+    try {
+      const file = new File(item.localPath);
+      if (file.exists) file.delete();
+    } catch {
+      // file may already be gone
+    }
+  }
+  const filtered = downloads.filter((d) => d.episodeGuid !== episodeGuid);
+  Storage.setItemSync(DOWNLOADS_KEY, JSON.stringify(filtered));
+}
+
+export function isInDownloads(episodeGuid: string): boolean {
+  return getDownloads().some((d) => d.episodeGuid === episodeGuid);
+}
+
+export function getDownloadItem(episodeGuid: string): DownloadItem | undefined {
+  return getDownloads().find((d) => d.episodeGuid === episodeGuid);
 }
 
 export function getWatchList(): WatchItem[] {

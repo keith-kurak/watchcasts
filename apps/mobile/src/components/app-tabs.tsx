@@ -12,9 +12,9 @@ export default function AppTabs() {
       backgroundColor={colors.background}
       indicatorColor={colors.backgroundElement}
       labelStyle={{ selected: { color: colors.text } }}>
-      <NativeTabs.Trigger name="(queue)">
-        <NativeTabs.Trigger.Label>Queue</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon sf="play.circle" md="queue_music" />
+      <NativeTabs.Trigger name="(downloads)">
+        <NativeTabs.Trigger.Label>Phone</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf="iphone" md="smartphone" />
       </NativeTabs.Trigger>
 
       <NativeTabs.Trigger name="(watch)">

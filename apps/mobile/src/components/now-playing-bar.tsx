@@ -1,5 +1,6 @@
 import { useAudioPlayerStatus } from 'expo-audio';
 import { Image } from 'expo-image';
+import { useSegments } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -14,8 +15,10 @@ export function NowPlayingBar() {
   const status = useAudioPlayerStatus(player);
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const segments = useSegments();
 
   if (!currentEpisode) return null;
+  if (segments.includes('episode' as never)) return null;
 
   const progress = status.duration > 0 ? status.currentTime / status.duration : 0;
   const imageUri = currentEpisode.imageUrl ?? currentPodcast?.artworkUrl;
