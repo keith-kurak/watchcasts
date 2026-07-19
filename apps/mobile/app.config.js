@@ -59,20 +59,22 @@ module.exports = ({ config }) => ({
         },
       },
     ],
-    //"./plugins/withWearableDataLayer",
     [
       "expo-audio",
       {
         enableBackgroundPlayback: true,
       },
     ],
+    [
+      "expo-build-properties",
+      {
+        usePrecompiledModules: true,
+      },
+    ],
   ],
   experiments: {
     typedRoutes: true,
     reactCompiler: true,
-    inlineModules: {
-      watchedDirectories: ["modules"],
-    },
   },
   extra: {
     eas: {

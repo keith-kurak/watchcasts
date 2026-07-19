@@ -1,4 +1,4 @@
-package dev.podcatch.app.modules
+package expo.modules.weardatalayer
 
 import android.util.Log
 import com.google.android.gms.wearable.Node
