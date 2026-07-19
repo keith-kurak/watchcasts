@@ -30,6 +30,24 @@ class WearDataLayerModule : Module() {
                 }
         }
 
+        AsyncFunction("syncWatchEpisodes") { json: String, promise: Promise ->
+            val context = appContext.reactContext
+                ?: return@AsyncFunction promise.reject("ERR", "No context", null)
+            val dataClient = Wearable.getDataClient(context)
+            val request = PutDataMapRequest.create(PATH_WATCH_EPISODES).apply {
+                dataMap.putString(KEY_ITEMS, json)
+                dataMap.putLong(KEY_UPDATED_AT, System.currentTimeMillis())
+            }.asPutDataRequest().setUrgent()
+            dataClient.putDataItem(request)
+                .addOnSuccessListener {
+                    Log.d(TAG, "Watch episodes synced to Data Layer")
+                    promise.resolve(null)
+                }
+                .addOnFailureListener { e ->
+                    promise.reject("ERR", e.message ?: "putDataItem failed", e)
+                }
+        }
+
         AsyncFunction("getConnectedNodes") { promise: Promise ->
             val context = appContext.reactContext
                 ?: return@AsyncFunction promise.reject("ERR", "No context", null)
@@ -50,6 +68,7 @@ class WearDataLayerModule : Module() {
     companion object {
         private const val TAG = "WearDataLayer"
         private const val PATH_SUBSCRIPTIONS = "/podcatch/subscriptions"
+        private const val PATH_WATCH_EPISODES = "/podcatch/watch-episodes"
         private const val KEY_ITEMS = "items"
         private const val KEY_UPDATED_AT = "updatedAt"
     }

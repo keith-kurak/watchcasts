@@ -1,25 +1,19 @@
 import { useAudioPlayerStatus } from 'expo-audio';
 import { Image } from 'expo-image';
+import { SymbolView } from 'expo-symbols';
 import { useRef } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { QueueToggle } from '@/components/queue-toggle';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { WatchToggle } from '@/components/watch-toggle';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAudio } from '@/lib/audio-context';
 import { formatDate, formatDuration, stripHtml } from '@/lib/format';
 import { getCachedEpisodes, getSubscriptions } from '@/lib/storage';
 import type { Episode, Podcast } from '@/lib/types';
-
-let SymbolView: React.ComponentType<{ name: string; size?: number; tintColor?: string }> | null =
-  null;
-if (Platform.OS === 'ios') {
-  try {
-    SymbolView = require('expo-symbols').SymbolView;
-  } catch {}
-}
 
 function formatSeconds(s: number): string {
   const h = Math.floor(s / 3600);
@@ -75,6 +69,7 @@ export function EpisodeDetail({ episodeId, podcastId }: EpisodeDetailProps) {
         )}
         <View style={styles.titleRow}>
           <ThemedText style={styles.title}>{episode.title}</ThemedText>
+          <WatchToggle podcastId={podcastId} episodeGuid={episode.guid} />
           <QueueToggle podcastId={podcastId} episodeGuid={episode.guid} />
         </View>
         <View style={styles.meta}>
@@ -139,17 +134,15 @@ function PlaybackControls({
   return (
     <View style={styles.controls}>
       <Pressable onPress={onPlayPause} style={styles.playButton} hitSlop={8}>
-        {SymbolView ? (
-          <SymbolView
-            name={isPlaying ? 'pause.fill' : 'play.fill'}
-            size={28}
-            tintColor={theme.text}
-          />
-        ) : (
-          <ThemedText style={styles.playButtonText}>
-            {isPlaying ? '⏸' : '▶'}
-          </ThemedText>
-        )}
+        <SymbolView
+          name={
+            isPlaying
+              ? { ios: 'pause.fill', android: 'pause' }
+              : { ios: 'play.fill', android: 'play_arrow' }
+          }
+          size={28}
+          tintColor={theme.text}
+        />
       </Pressable>
 
       {isThisEpisode && duration > 0 && (
@@ -243,9 +236,6 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  playButtonText: {
-    fontSize: 24,
   },
   progressContainer: {
     flex: 1,

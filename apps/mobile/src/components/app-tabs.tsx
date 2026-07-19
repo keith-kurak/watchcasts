@@ -17,6 +17,11 @@ export default function AppTabs() {
         <NativeTabs.Trigger.Icon sf="play.circle" md="queue_music" />
       </NativeTabs.Trigger>
 
+      <NativeTabs.Trigger name="(watch)">
+        <NativeTabs.Trigger.Label>Watch</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf="applewatch" md="watch" />
+      </NativeTabs.Trigger>
+
       <NativeTabs.Trigger name="(subscriptions)">
         <NativeTabs.Trigger.Label>Subscriptions</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf="list.bullet" md="format_list_bulleted" />

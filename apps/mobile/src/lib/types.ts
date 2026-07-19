@@ -21,3 +21,8 @@ export interface QueueItem {
   podcastId: string;
   episodeGuid: string;
 }
+
+export interface WatchItem {
+  podcastId: string;
+  episodeGuid: string;
+}

@@ -1,20 +1,13 @@
 import { useAudioPlayerStatus } from 'expo-audio';
 import { Image } from 'expo-image';
-import { Platform, Pressable, StyleSheet, View } from 'react-native';
+import { SymbolView } from 'expo-symbols';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { BottomTabInset, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAudio } from '@/lib/audio-context';
-
-let SymbolView: React.ComponentType<{ name: string; size?: number; tintColor?: string }> | null =
-  null;
-if (Platform.OS === 'ios') {
-  try {
-    SymbolView = require('expo-symbols').SymbolView;
-  } catch {}
-}
 
 export function NowPlayingBar() {
   const { player, currentEpisode, currentPodcast, pause, resume } = useAudio();
@@ -48,17 +41,15 @@ export function NowPlayingBar() {
           onPress={() => (status.playing ? pause() : resume())}
           hitSlop={8}
           style={styles.playPause}>
-          {SymbolView ? (
-            <SymbolView
-              name={status.playing ? 'pause.fill' : 'play.fill'}
-              size={20}
-              tintColor={theme.text}
-            />
-          ) : (
-            <ThemedText style={styles.playPauseText}>
-              {status.playing ? '⏸' : '▶'}
-            </ThemedText>
-          )}
+          <SymbolView
+            name={
+              status.playing
+                ? { ios: 'pause.fill', android: 'pause' }
+                : { ios: 'play.fill', android: 'play_arrow' }
+            }
+            size={20}
+            tintColor={theme.text}
+          />
         </Pressable>
       </View>
     </View>
@@ -101,8 +92,5 @@ const styles = StyleSheet.create({
     height: 36,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  playPauseText: {
-    fontSize: 18,
   },
 });

@@ -1,12 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
+import { syncWatchEpisodes } from '@/hooks/useWearDataLayer';
+
 import { fetchFeed } from './rss';
 import {
   addToQueue,
+  addToWatchList,
   getCachedEpisodes,
   getQueue,
+  getWatchList,
   isInQueue,
+  isOnWatchList,
   removeFromQueue,
+  removeFromWatchList,
   setCachedEpisodes,
 } from './storage';
 import type { Episode, Podcast } from './types';
@@ -80,6 +86,69 @@ export function useQueueMutations() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['queue'] });
+    },
+  });
+
+  return { add, remove };
+}
+
+export function useWatchListQuery(subscriptions: Podcast[]) {
+  return useQuery({
+    queryKey: ['watchList'],
+    queryFn: () => {
+      const list = getWatchList();
+      const items: EnrichedQueueItem[] = [];
+      for (const wi of list) {
+        const episodes = getCachedEpisodes(wi.podcastId);
+        const episode = episodes?.find((e) => e.guid === wi.episodeGuid);
+        if (!episode) continue;
+        const podcast = subscriptions.find((s) => s.id === wi.podcastId);
+        items.push({
+          episodeGuid: wi.episodeGuid,
+          podcastId: wi.podcastId,
+          episode,
+          podcast,
+        });
+      }
+      return items;
+    },
+  });
+}
+
+export function useIsOnWatchList(episodeGuid: string) {
+  return useQuery({
+    queryKey: ['watchList', 'check', episodeGuid],
+    queryFn: () => isOnWatchList(episodeGuid),
+  });
+}
+
+export function useWatchListMutations() {
+  const queryClient = useQueryClient();
+
+  function triggerSync() {
+    const list = getWatchList();
+    syncWatchEpisodes(list).catch(() => {});
+  }
+
+  const add = useMutation({
+    mutationFn: ({ podcastId, episodeGuid }: { podcastId: string; episodeGuid: string }) => {
+      addToWatchList(podcastId, episodeGuid);
+      return Promise.resolve();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['watchList'] });
+      triggerSync();
+    },
+  });
+
+  const remove = useMutation({
+    mutationFn: ({ episodeGuid }: { episodeGuid: string }) => {
+      removeFromWatchList(episodeGuid);
+      return Promise.resolve();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['watchList'] });
+      triggerSync();
     },
   });
 

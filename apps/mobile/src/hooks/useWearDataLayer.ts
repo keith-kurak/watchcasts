@@ -8,11 +8,13 @@ interface WearNode {
 
 interface WearDataLayerModule {
   syncSubscriptions(json: string): Promise<void>;
+  syncWatchEpisodes(json: string): Promise<void>;
   getConnectedNodes(): Promise<WearNode[]>;
 }
 
 const noop: WearDataLayerModule = {
   syncSubscriptions: async () => {},
+  syncWatchEpisodes: async () => {},
   getConnectedNodes: async () => [],
 };
 
@@ -26,6 +28,13 @@ export async function syncSubscriptions(
   subscriptions: unknown[],
 ): Promise<void> {
   await mod.syncSubscriptions(JSON.stringify(subscriptions));
+}
+
+/** Sync episodes queued for the watch via the Data Layer. */
+export async function syncWatchEpisodes(
+  episodes: unknown[],
+): Promise<void> {
+  await mod.syncWatchEpisodes(JSON.stringify(episodes));
 }
 
 /** Get the list of currently connected Wear OS nodes (watches). */
