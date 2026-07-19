@@ -6,66 +6,83 @@ import { DownloadToggle } from '@/components/download-toggle';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
+import { useDownloadContext } from '@/lib/download-context';
 import { formatDate, formatDuration } from '@/lib/format';
 import { useDownloadsQuery, type EnrichedDownloadItem } from '@/lib/queries';
 import { getSubscriptions } from '@/lib/storage';
 
-export default function DownloadsScreen() {
+function DownloadRow({ item }: { item: EnrichedDownloadItem }) {
   const router = useRouter();
+  const theme = useTheme();
+  const { getProgress } = useDownloadContext();
+  const progress = getProgress(item.episodeGuid);
+  const isDownloading = item.status === 'downloading' || progress != null;
+
+  return (
+    <Pressable
+      style={styles.episodeRow}
+      onPress={() =>
+        router.push({
+          pathname: '/(tabs)/(downloads)/episode/[episodeId]',
+          params: { episodeId: item.episodeGuid, podcastId: item.podcastId },
+        })
+      }
+    >
+      <Image
+        source={{ uri: item.episode.imageUrl ?? item.podcast?.artworkUrl }}
+        style={styles.thumbnail}
+        contentFit="cover"
+      />
+      <View style={styles.episodeContent}>
+        <ThemedText style={styles.episodeTitle} numberOfLines={2}>
+          {item.episode.title}
+        </ThemedText>
+        <View style={styles.episodeMeta}>
+          {isDownloading && (
+            <ThemedText type="small" themeColor="textSecondary">
+              Downloading… {progress != null ? `${Math.round(progress * 100)}%` : ''}
+            </ThemedText>
+          )}
+          {item.status === 'error' && (
+            <ThemedText type="small" style={{ color: '#FF3B30' }}>
+              Error
+            </ThemedText>
+          )}
+          {item.status === 'complete' && item.episode.pubDate && (
+            <ThemedText type="small" themeColor="textSecondary">
+              {formatDate(item.episode.pubDate)}
+            </ThemedText>
+          )}
+          {item.episode.duration && (
+            <ThemedText type="small" themeColor="textSecondary">
+              {formatDuration(item.episode.duration)}
+            </ThemedText>
+          )}
+        </View>
+        {isDownloading && (
+          <View style={[styles.progressTrack, { backgroundColor: theme.backgroundElement }]}>
+            <View
+              style={[
+                styles.progressFill,
+                { width: `${Math.round((progress ?? 0) * 100)}%` },
+              ]}
+            />
+          </View>
+        )}
+      </View>
+      <DownloadToggle
+        podcastId={item.podcastId}
+        episodeGuid={item.episodeGuid}
+        audioUrl={item.episode.audioUrl}
+      />
+    </Pressable>
+  );
+}
+
+export default function DownloadsScreen() {
   const subscriptions = getSubscriptions();
   const { data: downloads = [], isLoading, refetch, isRefetching } = useDownloadsQuery(subscriptions);
-
-  function renderItem({ item }: { item: EnrichedDownloadItem }) {
-    return (
-      <Pressable
-        style={styles.episodeRow}
-        onPress={() =>
-          router.push({
-            pathname: '/(tabs)/(downloads)/episode/[episodeId]',
-            params: { episodeId: item.episodeGuid, podcastId: item.podcastId },
-          })
-        }
-      >
-        <Image
-          source={{ uri: item.episode.imageUrl ?? item.podcast?.artworkUrl }}
-          style={styles.thumbnail}
-          contentFit="cover"
-        />
-        <View style={styles.episodeContent}>
-          <ThemedText style={styles.episodeTitle} numberOfLines={2}>
-            {item.episode.title}
-          </ThemedText>
-          <View style={styles.episodeMeta}>
-            {item.status === 'downloading' && (
-              <ThemedText type="small" themeColor="textSecondary">
-                Downloading…
-              </ThemedText>
-            )}
-            {item.status === 'error' && (
-              <ThemedText type="small" style={{ color: '#FF3B30' }}>
-                Error
-              </ThemedText>
-            )}
-            {item.status === 'complete' && item.episode.pubDate && (
-              <ThemedText type="small" themeColor="textSecondary">
-                {formatDate(item.episode.pubDate)}
-              </ThemedText>
-            )}
-            {item.episode.duration && (
-              <ThemedText type="small" themeColor="textSecondary">
-                {formatDuration(item.episode.duration)}
-              </ThemedText>
-            )}
-          </View>
-        </View>
-        <DownloadToggle
-          podcastId={item.podcastId}
-          episodeGuid={item.episodeGuid}
-          audioUrl={item.episode.audioUrl}
-        />
-      </Pressable>
-    );
-  }
 
   return (
     <ThemedView style={styles.container}>
@@ -75,11 +92,11 @@ export default function DownloadsScreen() {
         refreshing={isRefetching}
         onRefresh={() => refetch()}
         contentContainerStyle={styles.list}
-        renderItem={renderItem}
+        renderItem={({ item }) => <DownloadRow item={item} />}
         ListEmptyComponent={
           isLoading ? null : (
             <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
-              No downloads yet.
+              No episodes on phone.
             </ThemedText>
           )
         }
@@ -117,6 +134,16 @@ const styles = StyleSheet.create({
   episodeMeta: {
     flexDirection: 'row',
     gap: Spacing.three,
+  },
+  progressTrack: {
+    height: 3,
+    borderRadius: 1.5,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#007AFF',
+    borderRadius: 1.5,
   },
   emptyText: {
     textAlign: 'center',
