@@ -6,7 +6,7 @@ import { FlatList, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { WatchStatusIcon } from '@/components/playback-status-icon';
-import { Spacing } from '@/constants/theme';
+import { NowPlayingBarHeight, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { formatDate, formatDuration } from '@/lib/format';
 import { useWatchListQuery, type EnrichedDownloadItem } from '@/lib/queries';
@@ -113,6 +113,7 @@ const styles = StyleSheet.create({
   },
   list: {
     padding: Spacing.three,
+    paddingBottom: Spacing.three + NowPlayingBarHeight,
     gap: Spacing.one,
   },
   episodeRow: {

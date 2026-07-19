@@ -5,7 +5,7 @@ import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { DownloadToggle } from '@/components/download-toggle';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { NowPlayingBarHeight, Spacing } from '@/constants/theme';
 import { formatDate, formatDuration } from '@/lib/format';
 import { useFeedQuery } from '@/lib/queries';
 import { getSubscriptions } from '@/lib/storage';
@@ -83,6 +83,7 @@ const styles = StyleSheet.create({
   },
   list: {
     padding: Spacing.three,
+    paddingBottom: Spacing.three + NowPlayingBarHeight,
     gap: Spacing.one,
   },
   episodeRow: {

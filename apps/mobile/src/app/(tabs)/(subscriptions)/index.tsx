@@ -14,7 +14,7 @@ import {
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Colors, Spacing } from '@/constants/theme';
+import { Colors, NowPlayingBarHeight, Spacing } from '@/constants/theme';
 import { useColorScheme } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { fetchFeed } from '@/lib/rss';
@@ -181,6 +181,7 @@ const styles = StyleSheet.create({
   },
   list: {
     paddingHorizontal: Spacing.three,
+    paddingBottom: NowPlayingBarHeight,
   },
   emptyList: {
     flex: 1,

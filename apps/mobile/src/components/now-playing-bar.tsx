@@ -1,6 +1,6 @@
 import { useAudioPlayerStatus } from 'expo-audio';
 import { Image } from 'expo-image';
-import { useSegments } from 'expo-router';
+import { useRouter, useSegments, useGlobalSearchParams } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -16,15 +16,35 @@ export function NowPlayingBar() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const segments = useSegments();
+  const params = useGlobalSearchParams<{ episodeId?: string }>();
+  const router = useRouter();
 
   if (!currentEpisode) return null;
-  if (segments.includes('episode' as never)) return null;
+
+  // Only hide when viewing the detail screen of the currently playing episode
+  const isOnEpisodeDetail = segments.includes('episode' as never);
+  if (isOnEpisodeDetail && params.episodeId === currentEpisode.guid) return null;
 
   const progress = status.duration > 0 ? status.currentTime / status.duration : 0;
   const imageUri = currentEpisode.imageUrl ?? currentPodcast?.artworkUrl;
 
+  // Determine which tab group we're in to navigate to the right episode detail
+  function handlePress() {
+    if (!currentEpisode) return;
+    // Find which tab has this episode — try downloads first, fall back to subscriptions
+    const podcastId = currentPodcast?.id;
+    if (!podcastId) return;
+    router.push({
+      pathname: '/(tabs)/(downloads)/episode/[episodeId]',
+      params: { episodeId: currentEpisode.guid, podcastId },
+    });
+  }
+
   return (
-    <View style={[styles.wrapper, { backgroundColor: theme.backgroundElement, bottom: BottomTabInset + insets.bottom }]}>
+    <Pressable
+      onPress={handlePress}
+      style={[styles.wrapper, { backgroundColor: theme.backgroundElement, bottom: BottomTabInset + insets.bottom }]}
+    >
       <View style={[styles.progressLine, { backgroundColor: theme.backgroundSelected }]}>
         <View
           style={[
@@ -41,7 +61,10 @@ export function NowPlayingBar() {
           {currentEpisode.title}
         </ThemedText>
         <Pressable
-          onPress={() => (status.playing ? pause() : resume())}
+          onPress={(e) => {
+            e.stopPropagation();
+            status.playing ? pause() : resume();
+          }}
           hitSlop={8}
           style={styles.playPause}>
           <View pointerEvents="none">
@@ -57,7 +80,7 @@ export function NowPlayingBar() {
           </View>
         </Pressable>
       </View>
-    </View>
+    </Pressable>
   );
 }
 

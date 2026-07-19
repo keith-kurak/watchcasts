@@ -8,7 +8,7 @@ import { DownloadToggle } from '@/components/download-toggle';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { WatchToggle } from '@/components/watch-toggle';
-import { Spacing } from '@/constants/theme';
+import { NowPlayingBarHeight, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAudio } from '@/lib/audio-context';
 import { formatDate, formatDuration, parseDurationToSeconds, stripHtml } from '@/lib/format';
@@ -204,6 +204,7 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: Spacing.three,
+    paddingBottom: Spacing.three + NowPlayingBarHeight,
     gap: Spacing.three,
   },
   image: {
