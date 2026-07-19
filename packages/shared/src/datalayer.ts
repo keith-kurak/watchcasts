@@ -16,6 +16,8 @@
 export const DataPaths = {
   /** Full subscription list, synced phone -> watch. Payload: { items: Subscription[] }. */
   SUBSCRIPTIONS: "/podcatch/subscriptions",
+  /** Episodes explicitly queued for the watch, synced phone -> watch. Payload: { items: WatchEpisode[] }. */
+  WATCH_EPISODES: "/podcatch/watch-episodes",
 } as const;
 
 /** MessageClient paths (fire-and-forget RPC — transient). */

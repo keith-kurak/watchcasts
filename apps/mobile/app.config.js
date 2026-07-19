@@ -1,5 +1,3 @@
-import { ExpoConfig, ConfigContext } from "expo/config";
-
 // ─────────────────────────────────────────────────────────────────────────────
 // ⚠️  SHARED APP IDENTITY — MUST MATCH THE WATCH APP
 //
@@ -14,7 +12,7 @@ import { ExpoConfig, ConfigContext } from "expo/config";
 // ─────────────────────────────────────────────────────────────────────────────
 const APPLICATION_ID = "dev.podcatch.app";
 
-export default ({ config }: ConfigContext): ExpoConfig => ({
+module.exports = ({ config }) => ({
   ...config,
   name: "Podcatch",
   slug: "podcatch",
@@ -26,6 +24,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ios: {
     icon: "./assets/expo.icon",
     bundleIdentifier: APPLICATION_ID,
+    infoPlist: {
+      UIBackgroundModes: ["audio"],
+    },
   },
   android: {
     package: APPLICATION_ID,
@@ -43,6 +44,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   plugins: [
     "expo-router",
+    "expo-sqlite",
+    "expo-font",
+    "expo-image",
+    "expo-status-bar",
+    "expo-web-browser",
     [
       "expo-splash-screen",
       {
@@ -53,7 +59,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         },
       },
     ],
-    require("./plugins/withWearableDataLayer"),
+    //"./plugins/withWearableDataLayer",
+    [
+      "expo-audio",
+      {
+        enableBackgroundPlayback: true,
+      },
+    ],
   ],
   experiments: {
     typedRoutes: true,
@@ -61,5 +73,16 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     inlineModules: {
       watchedDirectories: ["modules"],
     },
+  },
+  extra: {
+    eas: {
+      projectId: "0b463a40-4929-4d6e-a899-6d2d886a0b85",
+    },
+  },
+  updates: {
+    url: "https://u.expo.dev/0b463a40-4929-4d6e-a899-6d2d886a0b85",
+  },
+  runtimeVersion: {
+    policy: "appVersion",
   },
 });

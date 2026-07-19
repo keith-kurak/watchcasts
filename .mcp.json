@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "argent": {
+      "type": "stdio",
+      "command": "/Users/keith/.volta/tools/image/node/22.21.1/bin/argent",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}
