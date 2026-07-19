@@ -26,6 +26,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ios: {
     icon: "./assets/expo.icon",
     bundleIdentifier: APPLICATION_ID,
+    infoPlist: {
+      UIBackgroundModes: ["audio"],
+    },
   },
   android: {
     package: APPLICATION_ID,
@@ -59,6 +62,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       },
     ],
     require("./plugins/withWearableDataLayer"),
+    [
+      "expo-audio",
+      {
+        enableBackgroundPlayback: true,
+      },
+    ],
   ],
   experiments: {
     typedRoutes: true,

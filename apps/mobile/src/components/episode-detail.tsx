@@ -1,13 +1,33 @@
+import { useAudioPlayerStatus } from 'expo-audio';
 import { Image } from 'expo-image';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { useRef } from 'react';
+import { Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { QueueToggle } from '@/components/queue-toggle';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
+import { useAudio } from '@/lib/audio-context';
 import { formatDate, formatDuration, stripHtml } from '@/lib/format';
 import { getCachedEpisodes, getSubscriptions } from '@/lib/storage';
 import type { Episode, Podcast } from '@/lib/types';
+
+let SymbolView: React.ComponentType<{ name: string; size?: number; tintColor?: string }> | null =
+  null;
+if (Platform.OS === 'ios') {
+  try {
+    SymbolView = require('expo-symbols').SymbolView;
+  } catch {}
+}
+
+function formatSeconds(s: number): string {
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = Math.floor(s % 60);
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+  return `${m}:${String(sec).padStart(2, '0')}`;
+}
 
 interface EpisodeDetailProps {
   episodeId: string;
@@ -18,6 +38,9 @@ export function EpisodeDetail({ episodeId, podcastId }: EpisodeDetailProps) {
   const podcast: Podcast | undefined = getSubscriptions().find((s) => s.id === podcastId);
   const episodes = getCachedEpisodes(podcastId) ?? [];
   const episode: Episode | undefined = episodes.find((e) => e.guid === episodeId);
+  const { player, currentEpisode, play, pause, resume } = useAudio();
+  const status = useAudioPlayerStatus(player);
+  const theme = useTheme();
 
   if (!episode) {
     return (
@@ -27,7 +50,22 @@ export function EpisodeDetail({ episodeId, podcastId }: EpisodeDetailProps) {
     );
   }
 
+  const isThisEpisode = currentEpisode?.guid === episode.guid;
+  const isPlaying = isThisEpisode && status.playing;
+
   const imageUri = episode.imageUrl ?? podcast?.artworkUrl;
+  const progress =
+    isThisEpisode && status.duration > 0 ? status.currentTime / status.duration : 0;
+
+  function handlePlayPause() {
+    if (!podcast) return;
+    if (isThisEpisode) {
+      if (status.playing) pause();
+      else resume();
+    } else {
+      play(episode!, podcast);
+    }
+  }
 
   return (
     <ThemedView style={styles.container}>
@@ -51,6 +89,22 @@ export function EpisodeDetail({ episodeId, podcastId }: EpisodeDetailProps) {
             </ThemedText>
           )}
         </View>
+
+        {episode.audioUrl && (
+          <PlaybackControls
+            isPlaying={isPlaying}
+            isThisEpisode={isThisEpisode}
+            progress={progress}
+            currentTime={isThisEpisode ? status.currentTime : 0}
+            duration={isThisEpisode ? status.duration : 0}
+            onPlayPause={handlePlayPause}
+            onSeek={async (seconds) => {
+              if (isThisEpisode) await player.seekTo(seconds);
+            }}
+            theme={theme}
+          />
+        )}
+
         {episode.description && (
           <ThemedText style={styles.description}>
             {stripHtml(episode.description)}
@@ -58,6 +112,87 @@ export function EpisodeDetail({ episodeId, podcastId }: EpisodeDetailProps) {
         )}
       </ScrollView>
     </ThemedView>
+  );
+}
+
+function PlaybackControls({
+  isPlaying,
+  isThisEpisode,
+  progress,
+  currentTime,
+  duration,
+  onPlayPause,
+  onSeek,
+  theme,
+}: {
+  isPlaying: boolean;
+  isThisEpisode: boolean;
+  progress: number;
+  currentTime: number;
+  duration: number;
+  onPlayPause: () => void;
+  onSeek: (seconds: number) => Promise<void>;
+  theme: ReturnType<typeof useTheme>;
+}) {
+  const progressBarWidth = useRef<number>(0);
+
+  return (
+    <View style={styles.controls}>
+      <Pressable onPress={onPlayPause} style={styles.playButton} hitSlop={8}>
+        {SymbolView ? (
+          <SymbolView
+            name={isPlaying ? 'pause.fill' : 'play.fill'}
+            size={28}
+            tintColor={theme.text}
+          />
+        ) : (
+          <ThemedText style={styles.playButtonText}>
+            {isPlaying ? '⏸' : '▶'}
+          </ThemedText>
+        )}
+      </Pressable>
+
+      {isThisEpisode && duration > 0 && (
+        <View style={styles.progressContainer}>
+          <Pressable
+            style={styles.progressBarOuter}
+            onPress={(e) => {
+              const x = e.nativeEvent.locationX;
+              if (progressBarWidth.current > 0) {
+                const seekTime = (x / progressBarWidth.current) * duration;
+                onSeek(Math.max(0, Math.min(seekTime, duration)));
+              }
+            }}
+            onLayout={(e) => {
+              progressBarWidth.current = e.nativeEvent.layout.width;
+            }}>
+            <View
+              style={[
+                styles.progressBarTrack,
+                { backgroundColor: theme.backgroundElement },
+              ]}>
+              <View
+                style={[
+                  styles.progressBarFill,
+                  {
+                    backgroundColor: theme.text,
+                    width: `${Math.min(progress * 100, 100)}%`,
+                  },
+                ]}
+              />
+            </View>
+          </Pressable>
+          <View style={styles.timeRow}>
+            <ThemedText type="small" themeColor="textSecondary">
+              {formatSeconds(currentTime)}
+            </ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              -{formatSeconds(Math.max(0, duration - currentTime))}
+            </ThemedText>
+          </View>
+        </View>
+      )}
+    </View>
   );
 }
 
@@ -96,5 +231,41 @@ const styles = StyleSheet.create({
   notFound: {
     textAlign: 'center',
     marginTop: Spacing.six,
+  },
+  controls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+  },
+  playButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  playButtonText: {
+    fontSize: 24,
+  },
+  progressContainer: {
+    flex: 1,
+    gap: Spacing.one,
+  },
+  progressBarOuter: {
+    height: 24,
+    justifyContent: 'center',
+  },
+  progressBarTrack: {
+    height: 4,
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    borderRadius: 2,
+  },
+  timeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
   },
 });
