@@ -1,7 +1,7 @@
 import { Directory, File, Paths } from 'expo-file-system';
 import { Storage } from 'expo-sqlite/kv-store';
 
-import type { DownloadItem, Episode, Podcast, WatchItem } from './types';
+import type { DownloadItem, Episode, PlaybackProgress, Podcast, WatchItem } from './types';
 
 const SUBSCRIPTIONS_KEY = 'subscriptions';
 const DOWNLOADS_KEY = 'downloads';
@@ -116,4 +116,21 @@ export function removeFromWatchList(episodeGuid: string): void {
 
 export function isOnWatchList(episodeGuid: string): boolean {
   return getWatchList().some((w) => w.episodeGuid === episodeGuid);
+}
+
+function playbackKey(episodeGuid: string) {
+  return `playback:${episodeGuid}`;
+}
+
+export function getPlaybackProgress(episodeGuid: string): PlaybackProgress | null {
+  const raw = Storage.getItemSync(playbackKey(episodeGuid));
+  if (!raw) return null;
+  return JSON.parse(raw) as PlaybackProgress;
+}
+
+export function setPlaybackProgress(
+  episodeGuid: string,
+  progress: PlaybackProgress,
+): void {
+  Storage.setItemSync(playbackKey(episodeGuid), JSON.stringify(progress));
 }

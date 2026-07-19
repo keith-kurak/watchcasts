@@ -30,3 +30,8 @@ export interface WatchItem {
   podcastId: string;
   episodeGuid: string;
 }
+
+export interface PlaybackProgress {
+  position: number;
+  duration: number;
+}

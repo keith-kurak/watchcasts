@@ -9,6 +9,7 @@ import {
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 
+import { setPlaybackProgress } from '@/lib/storage';
 import type { Episode, Podcast } from '@/lib/types';
 
 interface NowPlaying {
@@ -53,13 +54,30 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  // Stop retrying once playback starts
+  // Stop retrying once playback starts, and periodically save progress
+  const progressSaveRef = useRef(0);
   useEffect(() => {
     const sub = player.addListener('playbackStatusUpdate', (status) => {
       if (status.playing) clearPlayRetry();
+      // Save progress every ~5 seconds (updateInterval is 500ms, so every 10 updates)
+      progressSaveRef.current++;
+      if (progressSaveRef.current >= 10) {
+        progressSaveRef.current = 0;
+        saveProgress();
+      }
     });
     return () => sub.remove();
   }, [player]);
+
+  function saveProgress() {
+    const ep = nowPlaying?.episode;
+    if (!ep || !player) return;
+    const pos = player.currentTime;
+    const dur = player.duration;
+    if (dur > 0) {
+      setPlaybackProgress(ep.guid, { position: pos, duration: dur });
+    }
+  }
 
   const value = useMemo<AudioContextValue>(
     () => ({
@@ -69,6 +87,8 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
       play: async (episode: Episode, podcast: Podcast, localUri?: string) => {
         const uri = localUri ?? episode.audioUrl;
         if (!uri) return;
+        // Save progress of currently playing episode before switching
+        saveProgress();
         clearPlayRetry();
         player.replace({ uri });
         player.play();
@@ -105,6 +125,7 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
       },
       pause: () => {
         clearPlayRetry();
+        saveProgress();
         player.pause();
       },
       resume: () => {

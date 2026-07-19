@@ -5,7 +5,7 @@ import { FlatList, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { WatchToggle } from '@/components/watch-toggle';
+import { WatchStatusIcon } from '@/components/playback-status-icon';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { formatDate, formatDuration } from '@/lib/format';
@@ -61,7 +61,7 @@ export default function WatchScreen() {
             )}
           </View>
         </View>
-        <WatchToggle podcastId={item.podcastId} episodeGuid={item.episodeGuid} />
+        <WatchStatusIcon episodeGuid={item.episodeGuid} />
       </Pressable>
     );
   }
