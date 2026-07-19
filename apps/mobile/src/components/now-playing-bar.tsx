@@ -41,15 +41,17 @@ export function NowPlayingBar() {
           onPress={() => (status.playing ? pause() : resume())}
           hitSlop={8}
           style={styles.playPause}>
-          <SymbolView
-            name={
-              status.playing
-                ? { ios: 'pause.fill', android: 'pause' }
-                : { ios: 'play.fill', android: 'play_arrow' }
-            }
-            size={20}
-            tintColor={theme.text}
-          />
+          <View pointerEvents="none">
+            <SymbolView
+              name={
+                status.playing
+                  ? { ios: 'pause.fill', android: 'pause' }
+                  : { ios: 'play.fill', android: 'play_arrow' }
+              }
+              size={20}
+              tintColor={theme.text}
+            />
+          </View>
         </Pressable>
       </View>
     </View>

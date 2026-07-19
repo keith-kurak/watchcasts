@@ -36,6 +36,18 @@ export function formatDuration(raw?: string): string {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
+export function parseDurationToSeconds(raw?: string): number {
+  if (!raw) return 0;
+  if (raw.includes(':')) {
+    const parts = raw.split(':').map(Number);
+    if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    if (parts.length === 2) return parts[0] * 60 + parts[1];
+    return 0;
+  }
+  const seconds = parseInt(raw, 10);
+  return isNaN(seconds) ? 0 : seconds;
+}
+
 export function stripHtml(html: string): string {
   return html
     .replace(/<[^>]*>/g, '')

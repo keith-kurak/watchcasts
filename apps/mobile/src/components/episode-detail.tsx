@@ -11,7 +11,7 @@ import { WatchToggle } from '@/components/watch-toggle';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAudio } from '@/lib/audio-context';
-import { formatDate, formatDuration, stripHtml } from '@/lib/format';
+import { formatDate, formatDuration, parseDurationToSeconds, stripHtml } from '@/lib/format';
 import { getCachedEpisodes, getSubscriptions } from '@/lib/storage';
 import type { Episode, Podcast } from '@/lib/types';
 
@@ -48,8 +48,10 @@ export function EpisodeDetail({ episodeId, podcastId }: EpisodeDetailProps) {
   const isPlaying = isThisEpisode && status.playing;
 
   const imageUri = episode.imageUrl ?? podcast?.artworkUrl;
-  const progress =
-    isThisEpisode && status.duration > 0 ? status.currentTime / status.duration : 0;
+  const episodeDuration = parseDurationToSeconds(episode.duration);
+  const activeDuration = isThisEpisode && status.duration > 0 ? status.duration : episodeDuration;
+  const currentTime = isThisEpisode ? status.currentTime : 0;
+  const progress = activeDuration > 0 ? currentTime / activeDuration : 0;
 
   function handlePlayPause() {
     if (!podcast) return;
@@ -88,10 +90,9 @@ export function EpisodeDetail({ episodeId, podcastId }: EpisodeDetailProps) {
         {episode.audioUrl && (
           <PlaybackControls
             isPlaying={isPlaying}
-            isThisEpisode={isThisEpisode}
             progress={progress}
-            currentTime={isThisEpisode ? status.currentTime : 0}
-            duration={isThisEpisode ? status.duration : 0}
+            currentTime={currentTime}
+            duration={activeDuration}
             onPlayPause={handlePlayPause}
             onSeek={async (seconds) => {
               if (isThisEpisode) await player.seekTo(seconds);
@@ -112,7 +113,6 @@ export function EpisodeDetail({ episodeId, podcastId }: EpisodeDetailProps) {
 
 function PlaybackControls({
   isPlaying,
-  isThisEpisode,
   progress,
   currentTime,
   duration,
@@ -121,7 +121,6 @@ function PlaybackControls({
   theme,
 }: {
   isPlaying: boolean;
-  isThisEpisode: boolean;
   progress: number;
   currentTime: number;
   duration: number;
@@ -134,18 +133,20 @@ function PlaybackControls({
   return (
     <View style={styles.controls}>
       <Pressable onPress={onPlayPause} style={styles.playButton} hitSlop={8}>
-        <SymbolView
-          name={
-            isPlaying
-              ? { ios: 'pause.fill', android: 'pause' }
-              : { ios: 'play.fill', android: 'play_arrow' }
-          }
-          size={28}
-          tintColor={theme.text}
-        />
+        <View pointerEvents="none">
+          <SymbolView
+            name={
+              isPlaying
+                ? { ios: 'pause.fill', android: 'pause' }
+                : { ios: 'play.fill', android: 'play_arrow' }
+            }
+            size={28}
+            tintColor={theme.text}
+          />
+        </View>
       </Pressable>
 
-      {isThisEpisode && duration > 0 && (
+      {duration > 0 && (
         <View style={styles.progressContainer}>
           <Pressable
             style={styles.progressBarOuter}

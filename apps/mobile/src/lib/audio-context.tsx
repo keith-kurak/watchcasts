@@ -31,6 +31,7 @@ const AudioContext = createContext<AudioContextValue | null>(null);
 export function AudioProvider({ children }: { children: React.ReactNode }) {
   const playerRef = useRef<AudioPlayer | null>(null);
   const [nowPlaying, setNowPlaying] = useState<NowPlaying | null>(null);
+  const playRetryRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   if (!playerRef.current) {
     playerRef.current = createAudioPlayer(null, { updateInterval: 500 });
@@ -45,6 +46,21 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  function clearPlayRetry() {
+    if (playRetryRef.current) {
+      clearInterval(playRetryRef.current);
+      playRetryRef.current = null;
+    }
+  }
+
+  // Stop retrying once playback starts
+  useEffect(() => {
+    const sub = player.addListener('playbackStatusUpdate', (status) => {
+      if (status.playing) clearPlayRetry();
+    });
+    return () => sub.remove();
+  }, [player]);
+
   const value = useMemo<AudioContextValue>(
     () => ({
       player,
@@ -52,9 +68,26 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
       currentPodcast: nowPlaying?.podcast ?? null,
       play: async (episode: Episode, podcast: Podcast) => {
         if (!episode.audioUrl) return;
+        clearPlayRetry();
         player.replace({ uri: episode.audioUrl });
         player.play();
         setNowPlaying({ episode, podcast });
+
+        // On Android, play() right after replace() may silently fail while
+        // the source is still loading. Retry every 500ms until it starts.
+        let retries = 0;
+        playRetryRef.current = setInterval(() => {
+          retries++;
+          if (retries >= 20) {
+            clearPlayRetry();
+            return;
+          }
+          if (!player.playing) {
+            player.play();
+          } else {
+            clearPlayRetry();
+          }
+        }, 500);
 
         if (Platform.OS === 'android') {
           await requestNotificationPermissionsAsync();
@@ -69,8 +102,13 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
           // Lock screen controls may fail on dev builds; non-critical
         }
       },
-      pause: () => player.pause(),
-      resume: () => player.play(),
+      pause: () => {
+        clearPlayRetry();
+        player.pause();
+      },
+      resume: () => {
+        player.play();
+      },
       seekTo: (seconds: number) => player.seekTo(seconds),
     }),
     [player, nowPlaying],

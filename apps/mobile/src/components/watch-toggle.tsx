@@ -1,5 +1,5 @@
 import { SymbolView } from 'expo-symbols';
-import { Pressable, StyleSheet } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { useIsOnWatchList, useWatchListMutations } from '@/lib/queries';
 
@@ -22,12 +22,14 @@ export function WatchToggle({ podcastId, episodeGuid }: WatchToggleProps) {
 
   return (
     <Pressable onPress={handlePress} style={styles.button} hitSlop={8}>
-      <SymbolView
-        name={{ ios: 'applewatch', android: 'watch', web: 'watch' }}
-        size={24}
-        tintColor={onWatchList ? '#34C759' : '#8E8E93'}
-        weight={onWatchList ? 'bold' : 'regular'}
-      />
+      <View pointerEvents="none">
+        <SymbolView
+          name={{ ios: 'applewatch', android: 'watch', web: 'watch' }}
+          size={24}
+          tintColor={onWatchList ? '#34C759' : '#8E8E93'}
+          weight={onWatchList ? 'bold' : 'regular'}
+        />
+      </View>
     </Pressable>
   );
 }

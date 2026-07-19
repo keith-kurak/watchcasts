@@ -1,5 +1,5 @@
 import { SymbolView } from 'expo-symbols';
-import { Pressable, StyleSheet } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { useIsInQueue, useQueueMutations } from '@/lib/queries';
 
@@ -22,15 +22,17 @@ export function QueueToggle({ podcastId, episodeGuid }: QueueToggleProps) {
 
   return (
     <Pressable onPress={handlePress} style={styles.button} hitSlop={8}>
-      <SymbolView
-        name={
-          inQueue
-            ? { ios: 'checkmark.circle.fill', android: 'check_circle' }
-            : { ios: 'plus.circle', android: 'add_circle' }
-        }
-        size={24}
-        tintColor={inQueue ? '#34C759' : '#8E8E93'}
-      />
+      <View pointerEvents="none">
+        <SymbolView
+          name={
+            inQueue
+              ? { ios: 'checkmark.circle.fill', android: 'check_circle' }
+              : { ios: 'plus.circle', android: 'add_circle' }
+          }
+          size={24}
+          tintColor={inQueue ? '#34C759' : '#8E8E93'}
+        />
+      </View>
     </Pressable>
   );
 }
