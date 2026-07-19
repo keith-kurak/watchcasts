@@ -1,5 +1,3 @@
-import { ExpoConfig, ConfigContext } from "expo/config";
-
 // ─────────────────────────────────────────────────────────────────────────────
 // ⚠️  SHARED APP IDENTITY — MUST MATCH THE WATCH APP
 //
@@ -14,7 +12,7 @@ import { ExpoConfig, ConfigContext } from "expo/config";
 // ─────────────────────────────────────────────────────────────────────────────
 const APPLICATION_ID = "dev.podcatch.app";
 
-export default ({ config }: ConfigContext): ExpoConfig => ({
+module.exports = ({ config }) => ({
   ...config,
   name: "Podcatch",
   slug: "podcatch",
@@ -61,7 +59,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         },
       },
     ],
-    require("./plugins/withWearableDataLayer"),
+    //"./plugins/withWearableDataLayer",
     [
       "expo-audio",
       {
@@ -75,5 +73,16 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     inlineModules: {
       watchedDirectories: ["modules"],
     },
+  },
+  extra: {
+    eas: {
+      projectId: "0b463a40-4929-4d6e-a899-6d2d886a0b85",
+    },
+  },
+  updates: {
+    url: "https://u.expo.dev/0b463a40-4929-4d6e-a899-6d2d886a0b85",
+  },
+  runtimeVersion: {
+    policy: "appVersion",
   },
 });
