@@ -1,24 +1,22 @@
 import { Image } from 'expo-image';
-import { useRouter } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   FlatList,
   Modal,
-  Platform,
   Pressable,
   StyleSheet,
   TextInput,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useFocusEffect } from 'expo-router';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors, Spacing } from '@/constants/theme';
 import { useColorScheme } from 'react-native';
+import { useFocusEffect } from 'expo-router';
 import { fetchFeed } from '@/lib/rss';
 import {
   addSubscription,
@@ -29,7 +27,6 @@ import type { Podcast } from '@/lib/types';
 
 export default function SubscriptionsScreen() {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
 
@@ -65,16 +62,15 @@ export default function SubscriptionsScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <View style={[styles.header, { paddingTop: insets.top + Spacing.two }]}>
-        <ThemedText type="title">Subscriptions</ThemedText>
-        <Pressable
-          style={[styles.addButton, { backgroundColor: colors.backgroundElement }]}
-          onPress={() => setModalVisible(true)}>
-          <ThemedText type="default" style={styles.addButtonText}>
-            +
-          </ThemedText>
-        </Pressable>
-      </View>
+      <Stack.Screen
+        options={{
+          headerRight: () => (
+            <Pressable onPress={() => setModalVisible(true)}>
+              <ThemedText style={styles.addButtonText}>+</ThemedText>
+            </Pressable>
+          ),
+        }}
+      />
 
       <FlatList
         data={podcasts}
@@ -90,7 +86,7 @@ export default function SubscriptionsScreen() {
               { backgroundColor: pressed ? colors.backgroundSelected : 'transparent' },
             ]}
             onPress={() =>
-              router.push({ pathname: '/podcast/[id]', params: { id: item.id } })
+              router.push({ pathname: '/(subscriptions)/podcast/[id]', params: { id: item.id } })
             }>
             {item.artworkUrl ? (
               <Image source={{ uri: item.artworkUrl }} style={styles.artwork} />
@@ -176,23 +172,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.four,
-    paddingBottom: Spacing.three,
-  },
-  addButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
   addButtonText: {
-    fontSize: 22,
-    lineHeight: 24,
+    fontSize: 28,
+    lineHeight: 32,
   },
   podcastTitle: {
     fontWeight: '600',

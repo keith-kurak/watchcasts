@@ -44,6 +44,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   plugins: [
     "expo-router",
     "expo-sqlite",
+    "expo-font",
+    "expo-image",
+    "expo-status-bar",
+    "expo-web-browser",
     [
       "expo-splash-screen",
       {

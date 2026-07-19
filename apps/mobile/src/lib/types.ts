@@ -14,4 +14,10 @@ export interface Episode {
   pubDate?: string;
   audioUrl?: string;
   duration?: string;
+  imageUrl?: string;
+}
+
+export interface QueueItem {
+  podcastId: string;
+  episodeGuid: string;
 }

@@ -57,6 +57,7 @@ export async function fetchFeed(
     pubDate: item.pubDate ?? undefined,
     audioUrl: item.enclosure?.['@_url'] ?? undefined,
     duration: item['itunes:duration'] != null ? String(item['itunes:duration']) : undefined,
+    imageUrl: item['itunes:image']?.['@_href'] ?? undefined,
   }));
 
   return { podcast, episodes };

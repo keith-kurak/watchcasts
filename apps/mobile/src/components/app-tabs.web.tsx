@@ -19,11 +19,11 @@ export default function AppTabs() {
       <TabSlot style={{ height: '100%' }} />
       <TabList asChild>
         <CustomTabList>
-          <TabTrigger name="subscriptions" href="/subscriptions" asChild>
-            <TabButton>Subscriptions</TabButton>
-          </TabTrigger>
-          <TabTrigger name="queue" href="/queue" asChild>
+          <TabTrigger name="(queue)" href="/" asChild>
             <TabButton>Queue</TabButton>
+          </TabTrigger>
+          <TabTrigger name="(subscriptions)" href="/(subscriptions)" asChild>
+            <TabButton>Subscriptions</TabButton>
           </TabTrigger>
         </CustomTabList>
       </TabList>
