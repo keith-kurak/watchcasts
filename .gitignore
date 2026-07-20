@@ -15,13 +15,13 @@ apps/mobile/web-build/
 expo-env.d.ts
 
 # Native Wear app (Gradle/Android Studio)
-apps/watch/.gradle/
-apps/watch/build/
-apps/watch/app/build/
-apps/watch/local.properties
-apps/watch/.idea/
-apps/watch/captures/
-apps/watch/*.iml
+apps/watch/android/.gradle/
+apps/watch/android/build/
+apps/watch/android/app/build/
+apps/watch/android/local.properties
+apps/watch/android/.idea/
+apps/watch/android/captures/
+apps/watch/android/*.iml
 
 # Signing — NEVER commit keystores
 *.keystore
@@ -32,4 +32,4 @@ apps/watch/*.iml
 *.log
 .env*.local
 apps/mobile/modules/wear-data-layer/android/build/*
-apps/watch/.kotlin/*
+apps/watch/android/.kotlin/*

@@ -6,14 +6,14 @@
     "preview-watch": {
       "android": {
         "config": "watch-preview.yml",
-        "buildArtifactPaths": ["apps/watch/app/build/outputs/**/*.apk"]
+        "buildArtifactPaths": ["apps/watch/android/app/build/outputs/**/*.apk"]
       },
       "distribution": "internal"
     },
     "production-watch": {
       "android": {
         "config": "watch-production.yml",
-        "buildArtifactPaths": ["apps/watch/app/build/outputs/**/*.aab"]
+        "buildArtifactPaths": ["apps/watch/android/app/build/outputs/**/*.aab"]
       }
     }
   }

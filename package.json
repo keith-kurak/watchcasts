@@ -11,7 +11,7 @@
     "mobile": "bun --filter @podcatch/mobile start",
     "mobile:android": "bun --filter @podcatch/mobile android",
     "mobile:ios": "bun --filter @podcatch/mobile ios",
-    "watch": "apps/watch/install.sh",
+    "watch": "./apps/watch/install.sh",
     "typecheck": "bun --filter '*' typecheck"
   }
 }

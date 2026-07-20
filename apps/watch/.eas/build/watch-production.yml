@@ -3,7 +3,7 @@ build:
   steps:
     - eas/checkout
     - eas/inject_android_credentials
-    - run:
-        name: Build Watch AAB
-        command: cd apps/watch && ./gradlew :app:bundleRelease
+    - eas/run_gradle:
+        inputs:
+          command: :app:bundleRelease
     - eas/find_and_upload_build_artifacts

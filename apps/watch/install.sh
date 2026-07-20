@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/android"
 ./gradlew :app:assembleDebug
 SERIAL=$(adb devices -l | grep gwear | awk '{print $1}')
 if [ -z "$SERIAL" ]; then

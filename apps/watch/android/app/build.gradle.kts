@@ -4,16 +4,12 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
-// Read the shared application id from gradle.properties (single source of truth
-// on the Gradle side; mirrors apps/mobile/app.config.ts).
-val sharedAppId: String = (project.findProperty("appId") as String?) ?: "dev.podcatch.app"
-
 android {
     namespace = "dev.podcatch.app"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = sharedAppId          // MUST match the phone app
+        applicationId = "com.keithkurak.watchcasts"  // MUST match the phone app
         minSdk = 30                          // Wear OS 3.0
         targetSdk = 35
         versionCode = 1
@@ -23,7 +19,7 @@ android {
     signingConfigs {
         // Debug signing must use the SAME keystore as the Expo-built phone app,
         // or the Wearable Data Layer API refuses to route between them.
-        val debugKeystore = file("${rootProject.projectDir}/../mobile/android/app/debug.keystore")
+        val debugKeystore = file("${rootProject.projectDir}/../../mobile/android/app/debug.keystore")
         if (debugKeystore.exists()) {
             getByName("debug") {
                 storeFile = debugKeystore
