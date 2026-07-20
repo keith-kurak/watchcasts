@@ -1,5 +1,6 @@
 package dev.podcatch.app.data
 
+import java.io.File
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -22,6 +23,9 @@ object SyncedWatchEpisodes {
     private val _episodes = MutableStateFlow<List<WatchEpisode>>(emptyList())
     val episodes: StateFlow<List<WatchEpisode>> = _episodes.asStateFlow()
 
+    /** Directory where episode audio files are downloaded. Must be set before [update]. */
+    var episodesDir: File? = null
+
     fun update(json: String?) {
         if (json == null) return
         val existing = _episodes.value.associateBy { it.guid }
@@ -31,6 +35,11 @@ object SyncedWatchEpisodes {
             val obj = array.optJSONObject(i) ?: continue
             val guid = obj.optString("guid", "")
             val prev = existing[guid]
+            // Check in-memory state first, then fall back to checking disk
+            val localPath = prev?.localPath ?: run {
+                val file = episodesDir?.let { File(it, "$guid.mp3") }
+                if (file?.exists() == true) file.absolutePath else null
+            }
             list.add(
                 WatchEpisode(
                     guid = guid,
@@ -41,8 +50,8 @@ object SyncedWatchEpisodes {
                     duration = obj.optString("duration", ""),
                     pubDate = obj.optString("pubDate", ""),
                     artworkUrl = obj.optString("artworkUrl", ""),
-                    downloadProgress = prev?.downloadProgress ?: 0,
-                    localPath = prev?.localPath,
+                    downloadProgress = if (localPath != null) 100 else (prev?.downloadProgress ?: 0),
+                    localPath = localPath,
                 )
             )
         }

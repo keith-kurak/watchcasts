@@ -14,6 +14,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import com.google.android.horologist.annotations.ExperimentalHorologistApi
 import com.google.android.horologist.audio.SystemAudioRepository
 import com.google.android.horologist.audio.ui.VolumeViewModel
+import com.google.android.horologist.audio.ui.components.actions.SetVolumeButton
 import com.google.android.horologist.media.data.repository.PlayerRepositoryImpl
 import com.google.android.horologist.media.model.Media
 import com.google.android.horologist.media.ui.components.PodcastControlButtons
@@ -26,7 +27,7 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalHorologistApi::class)
 @Composable
-fun EpisodePlayerScreen(guid: String) {
+fun EpisodePlayerScreen(guid: String, onVolumeClick: () -> Unit) {
     val episodes by SyncedWatchEpisodes.episodes.collectAsState()
     val episode = episodes.find { it.guid == guid }
     if (episode == null || episode.localPath == null) return
@@ -59,6 +60,8 @@ fun EpisodePlayerScreen(guid: String) {
         },
     )
 
+    val volumeUiState by volumeViewModel.volumeUiState.collectAsState()
+
     PlayerScreen(
         playerViewModel = playerViewModel,
         volumeViewModel = volumeViewModel,
@@ -71,7 +74,12 @@ fun EpisodePlayerScreen(guid: String) {
                 playerUiState = playerUiState,
             )
         },
-        buttons = { },
+        buttons = { _ ->
+            SetVolumeButton(
+                onVolumeClick = onVolumeClick,
+                volumeUiState = volumeUiState,
+            )
+        },
     )
 }
 

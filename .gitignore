@@ -32,3 +32,4 @@ apps/watch/*.iml
 *.log
 .env*.local
 apps/mobile/modules/wear-data-layer/android/build/*
+apps/watch/.kotlin/*

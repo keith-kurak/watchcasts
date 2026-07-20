@@ -44,6 +44,8 @@ import androidx.wear.compose.material.TimeText
 import androidx.wear.compose.navigation.SwipeDismissableNavHost
 import androidx.wear.compose.navigation.composable
 import androidx.wear.compose.navigation.rememberSwipeDismissableNavController
+import com.google.android.horologist.annotations.ExperimentalHorologistApi
+import com.google.android.horologist.audio.ui.VolumeScreen
 import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
@@ -61,6 +63,7 @@ import dev.podcatch.app.data.EpisodeDownloadWorker
 import dev.podcatch.app.data.WatchEpisode
 import dev.podcatch.app.data.SyncedSubscriptions
 import dev.podcatch.app.data.SyncedWatchEpisodes
+import java.io.File
 import dev.podcatch.app.presentation.theme.PodcatchTheme
 
 class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
@@ -68,6 +71,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
+        SyncedWatchEpisodes.episodesDir = File(filesDir, "episodes")
         setContent { PodcatchApp() }
     }
 
@@ -175,6 +179,7 @@ private fun enqueueEpisodeDownload(context: android.content.Context, episode: Wa
     )
 }
 
+@OptIn(ExperimentalHorologistApi::class)
 @Composable
 fun PodcatchApp() {
     PodcatchTheme {
@@ -195,7 +200,13 @@ fun PodcatchApp() {
                 }
                 composable("player/{guid}") { backStackEntry ->
                     val guid = backStackEntry.arguments?.getString("guid") ?: return@composable
-                    EpisodePlayerScreen(guid = Uri.decode(guid))
+                    EpisodePlayerScreen(
+                        guid = Uri.decode(guid),
+                        onVolumeClick = { navController.navigate("volume") },
+                    )
+                }
+                composable("volume") {
+                    VolumeScreen()
                 }
             }
         }
