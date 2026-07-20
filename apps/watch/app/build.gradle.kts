@@ -23,11 +23,14 @@ android {
     signingConfigs {
         // Debug signing must use the SAME keystore as the Expo-built phone app,
         // or the Wearable Data Layer API refuses to route between them.
-        getByName("debug") {
-            storeFile = file("${rootProject.projectDir}/../mobile/android/app/debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+        val debugKeystore = file("${rootProject.projectDir}/../mobile/android/app/debug.keystore")
+        if (debugKeystore.exists()) {
+            getByName("debug") {
+                storeFile = debugKeystore
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
         }
 
         // Release signing pulls from gradle properties / env so the same keystore
