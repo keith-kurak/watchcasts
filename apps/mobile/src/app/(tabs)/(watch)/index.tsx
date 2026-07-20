@@ -1,6 +1,7 @@
 import { Image } from 'expo-image';
-import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { SymbolView } from 'expo-symbols';
+import { Stack, useRouter } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import { FlatList, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -9,24 +10,35 @@ import { WatchStatusIcon } from '@/components/playback-status-icon';
 import { NowPlayingBarHeight, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { formatDate, formatDuration } from '@/lib/format';
-import { useWatchListQuery, type EnrichedDownloadItem } from '@/lib/queries';
+import { useWatchListQuery, useWatchListMutations, type EnrichedDownloadItem } from '@/lib/queries';
 import { getSubscriptions } from '@/lib/storage';
-import { getConnectedNodes } from '@/hooks/useWearDataLayer';
+import { getConnectedNodes, sendForceDownload } from '@/hooks/useWearDataLayer';
 
 export default function WatchScreen() {
   const router = useRouter();
   const theme = useTheme();
   const subscriptions = getSubscriptions();
   const { data: watchList = [], isLoading, refetch, isRefetching } = useWatchListQuery(subscriptions);
+  const { triggerSync } = useWatchListMutations();
   const [connected, setConnected] = useState<boolean | null>(null);
 
-  useEffect(() => {
+  const checkConnection = useCallback(() => {
     if (Platform.OS !== 'android') {
       setConnected(null);
       return;
     }
     getConnectedNodes().then((nodes) => setConnected(nodes.length > 0));
   }, []);
+
+  useEffect(() => {
+    checkConnection();
+  }, [checkConnection]);
+
+  const handleRefresh = useCallback(() => {
+    checkConnection();
+    triggerSync();
+    sendForceDownload().catch(() => {});
+  }, [checkConnection, triggerSync]);
 
   function renderItem({ item }: { item: EnrichedDownloadItem }) {
     return (
@@ -68,6 +80,15 @@ export default function WatchScreen() {
 
   return (
     <ThemedView style={styles.container}>
+      <Stack.Screen
+        options={{
+          headerRight: () => (
+            <Pressable onPress={handleRefresh}>
+              <SymbolView name={{ ios: 'arrow.trianglehead.2.clockwise', android: 'sync' }} size={22} tintColor={theme.text} />
+            </Pressable>
+          ),
+        }}
+      />
       {connected !== null && Platform.OS === 'android' && (
         <View
           style={[

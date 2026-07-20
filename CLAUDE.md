@@ -2,7 +2,7 @@
 
 ## Project
 
-Podcast app built with Expo Router and React Native. Monorepo with the mobile app at `apps/mobile/`.
+Podcast app built with Expo Router and React Native. Monorepo with the mobile app at `apps/mobile/`. This is an **Android-only** app — always use the `{ ios, android }` object form of `SymbolView` `name` to include Material Symbol names (e.g. `{ ios: 'arrow.trianglehead.2.clockwise', android: 'sync' }`). Never pass iOS-only SF Symbol strings.
 
 ## Argent Testing Workflow
 

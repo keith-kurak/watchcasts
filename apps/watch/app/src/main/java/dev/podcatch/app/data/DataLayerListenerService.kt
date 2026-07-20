@@ -1,33 +1,71 @@
 package dev.podcatch.app.data
 
 import android.util.Log
+import androidx.work.Constraints
+import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
 import com.google.android.gms.wearable.DataEvent
 import com.google.android.gms.wearable.DataEventBuffer
 import com.google.android.gms.wearable.DataMapItem
+import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.WearableListenerService
+import java.io.File
 
-/**
- * Entry point for everything the phone app pushes over the Data Layer.
- *
- * When the phone updates the subscription DataItem, onDataChanged fires here
- * (even if the watch app isn't in the foreground). This is where you'd persist
- * the synced subscriptions to Room and, separately, enqueue a WorkManager job to
- * download new episodes while the watch is on Wi-Fi + charging.
- */
 class DataLayerListenerService : WearableListenerService() {
 
     override fun onDataChanged(events: DataEventBuffer) {
         for (event in events) {
             if (event.type != DataEvent.TYPE_CHANGED) continue
             val item = event.dataItem
-            if (item.uri.path == DataLayerContract.PATH_SUBSCRIPTIONS) {
-                val dataMap = DataMapItem.fromDataItem(item).dataMap
-                val json = dataMap.getString(DataLayerContract.KEY_ITEMS)
-                val updatedAt = dataMap.getLong(DataLayerContract.KEY_UPDATED_AT)
-                Log.d(TAG, "Subscriptions synced (updatedAt=$updatedAt)")
-                SyncedSubscriptions.update(json)
+            val dataMap = DataMapItem.fromDataItem(item).dataMap
+            val json = dataMap.getString(DataLayerContract.KEY_ITEMS)
+            val updatedAt = dataMap.getLong(DataLayerContract.KEY_UPDATED_AT)
+            when (item.uri.path) {
+                DataLayerContract.PATH_SUBSCRIPTIONS -> {
+                    Log.d(TAG, "Subscriptions synced (updatedAt=$updatedAt)")
+                    SyncedSubscriptions.update(json)
+                }
+                DataLayerContract.PATH_WATCH_EPISODES -> {
+                    Log.d(TAG, "Watch episodes synced (updatedAt=$updatedAt)")
+                    SyncedWatchEpisodes.episodesDir = File(applicationContext.filesDir, "episodes")
+                    SyncedWatchEpisodes.update(json)
+                    enqueueDownloads()
+                }
             }
         }
+    }
+
+    override fun onMessageReceived(messageEvent: MessageEvent) {
+        when (messageEvent.path) {
+            DataLayerContract.PATH_REQUEST_SYNC -> {
+                Log.d(TAG, "Received force-download request from phone")
+                SyncedWatchEpisodes.episodesDir = File(applicationContext.filesDir, "episodes")
+                enqueueDownloads()
+            }
+        }
+    }
+
+    private fun enqueueDownloads() {
+        val hasUndownloaded = SyncedWatchEpisodes.episodes.value
+            .any { it.localPath == null && it.audioUrl.isNotBlank() }
+        if (!hasUndownloaded) return
+
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .build()
+
+        val request = OneTimeWorkRequestBuilder<EpisodeDownloadWorker>()
+            .setConstraints(constraints)
+            .build()
+
+        WorkManager.getInstance(applicationContext).enqueueUniqueWork(
+            EpisodeDownloadWorker.UNIQUE_WORK_NAME,
+            ExistingWorkPolicy.KEEP,
+            request,
+        )
+        Log.d(TAG, "Enqueued episode download worker")
     }
 
     companion object {

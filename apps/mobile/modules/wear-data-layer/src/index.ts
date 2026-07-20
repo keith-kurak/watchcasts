@@ -1,26 +1,15 @@
-import { Platform } from "react-native";
-import { requireNativeModule } from "expo-modules-core";
+import { NativeModule, requireNativeModule } from "expo";
 
 interface WearNode {
   id: string;
   displayName: string;
 }
 
-interface WearDataLayerModuleType {
+declare class WearDataLayerModule extends NativeModule<{}> {
   syncSubscriptions(json: string): Promise<void>;
   syncWatchEpisodes(json: string): Promise<void>;
+  sendForceDownload(): Promise<void>;
   getConnectedNodes(): Promise<WearNode[]>;
 }
 
-const noop: WearDataLayerModuleType = {
-  syncSubscriptions: async () => {},
-  syncWatchEpisodes: async () => {},
-  getConnectedNodes: async () => [],
-};
-
-const mod: WearDataLayerModuleType =
-  Platform.OS === "android"
-    ? requireNativeModule<WearDataLayerModuleType>("WearDataLayerModule")
-    : noop;
-
-export const { syncSubscriptions, syncWatchEpisodes, getConnectedNodes } = mod;
+export default requireNativeModule<WearDataLayerModule>("WearDataLayerModule");

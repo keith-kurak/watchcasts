@@ -1,43 +1,34 @@
 import { Platform } from "react-native";
-import { requireNativeModule } from "expo-modules-core";
+import WearDataLayerModule from "../../modules/wear-data-layer/src";
 
-interface WearNode {
-  id: string;
-  displayName: string;
-}
-
-interface WearDataLayerModule {
-  syncSubscriptions(json: string): Promise<void>;
-  syncWatchEpisodes(json: string): Promise<void>;
-  getConnectedNodes(): Promise<WearNode[]>;
-}
-
-const noop: WearDataLayerModule = {
-  syncSubscriptions: async () => {},
-  syncWatchEpisodes: async () => {},
-  getConnectedNodes: async () => [],
-};
-
-const mod: WearDataLayerModule =
-  Platform.OS === "android"
-    ? requireNativeModule<WearDataLayerModule>("WearDataLayerModule")
-    : noop;
+const isAndroid = Platform.OS === "android";
 
 /** Sync the full subscription list to a paired Wear OS device via the Data Layer. */
 export async function syncSubscriptions(
   subscriptions: unknown[],
 ): Promise<void> {
-  await mod.syncSubscriptions(JSON.stringify(subscriptions));
+  if (!isAndroid) return;
+  await WearDataLayerModule.syncSubscriptions(JSON.stringify(subscriptions));
 }
 
 /** Sync episodes queued for the watch via the Data Layer. */
 export async function syncWatchEpisodes(
   episodes: unknown[],
 ): Promise<void> {
-  await mod.syncWatchEpisodes(JSON.stringify(episodes));
+  if (!isAndroid) return;
+  await WearDataLayerModule.syncWatchEpisodes(JSON.stringify(episodes));
+}
+
+/** Send a message to the watch to force-download any undownloaded episodes. */
+export async function sendForceDownload(): Promise<void> {
+  if (!isAndroid) return;
+  await WearDataLayerModule.sendForceDownload();
 }
 
 /** Get the list of currently connected Wear OS nodes (watches). */
-export async function getConnectedNodes(): Promise<WearNode[]> {
-  return mod.getConnectedNodes();
+export async function getConnectedNodes(): Promise<
+  { id: string; displayName: string }[]
+> {
+  if (!isAndroid) return [];
+  return WearDataLayerModule.getConnectedNodes();
 }

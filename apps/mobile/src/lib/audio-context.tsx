@@ -9,7 +9,7 @@ import {
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 
-import { setPlaybackProgress } from '@/lib/storage';
+import { getPlaybackProgress, setPlaybackProgress } from '@/lib/storage';
 import type { Episode, Podcast } from '@/lib/types';
 
 interface NowPlaying {
@@ -91,6 +91,11 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
         saveProgress();
         clearPlayRetry();
         player.replace({ uri });
+        // Resume from saved position if the episode was previously in progress
+        const saved = getPlaybackProgress(episode.guid);
+        if (saved && saved.duration > 0 && saved.position / saved.duration < 0.95) {
+          player.seekTo(saved.position);
+        }
         player.play();
         setNowPlaying({ episode, podcast });
 

@@ -48,6 +48,35 @@ class WearDataLayerModule : Module() {
                 }
         }
 
+        AsyncFunction("sendForceDownload") { promise: Promise ->
+            val context = appContext.reactContext
+                ?: return@AsyncFunction promise.reject("ERR", "No context", null)
+            val nodeClient = Wearable.getNodeClient(context)
+            val messageClient = Wearable.getMessageClient(context)
+            nodeClient.connectedNodes
+                .addOnSuccessListener { nodes: MutableList<Node> ->
+                    if (nodes.isEmpty()) {
+                        promise.resolve(null)
+                        return@addOnSuccessListener
+                    }
+                    var pending = nodes.size
+                    for (node in nodes) {
+                        messageClient.sendMessage(node.id, PATH_REQUEST_SYNC, ByteArray(0))
+                            .addOnSuccessListener {
+                                Log.d(TAG, "Sent force-download message to ${node.displayName}")
+                                if (--pending == 0) promise.resolve(null)
+                            }
+                            .addOnFailureListener { e ->
+                                Log.e(TAG, "Failed to send message to ${node.displayName}", e)
+                                if (--pending == 0) promise.resolve(null)
+                            }
+                    }
+                }
+                .addOnFailureListener { e ->
+                    promise.reject("ERR", e.message ?: "getConnectedNodes failed", e)
+                }
+        }
+
         AsyncFunction("getConnectedNodes") { promise: Promise ->
             val context = appContext.reactContext
                 ?: return@AsyncFunction promise.reject("ERR", "No context", null)
@@ -69,6 +98,7 @@ class WearDataLayerModule : Module() {
         private const val TAG = "WearDataLayer"
         private const val PATH_SUBSCRIPTIONS = "/podcatch/subscriptions"
         private const val PATH_WATCH_EPISODES = "/podcatch/watch-episodes"
+        private const val PATH_REQUEST_SYNC = "/podcatch/request-sync"
         private const val KEY_ITEMS = "items"
         private const val KEY_UPDATED_AT = "updatedAt"
     }
