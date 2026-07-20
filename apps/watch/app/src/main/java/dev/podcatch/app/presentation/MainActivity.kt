@@ -27,6 +27,7 @@ import com.google.android.gms.wearable.DataMapItem
 import com.google.android.gms.wearable.Wearable
 import dev.podcatch.app.data.DataLayerContract
 import dev.podcatch.app.data.SyncedSubscriptions
+import dev.podcatch.app.data.SyncedWatchEpisodes
 import dev.podcatch.app.presentation.theme.PodcatchTheme
 
 class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
@@ -45,11 +46,17 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
             .getDataItems()
             .addOnSuccessListener { items ->
                 for (item in items) {
-                    if (item.uri.path == DataLayerContract.PATH_SUBSCRIPTIONS) {
-                        val dataMap = DataMapItem.fromDataItem(item).dataMap
-                        val json = dataMap.getString(DataLayerContract.KEY_ITEMS)
-                        Log.d(TAG, "Read existing subscriptions from Data Layer")
-                        SyncedSubscriptions.update(json)
+                    val dataMap = DataMapItem.fromDataItem(item).dataMap
+                    val json = dataMap.getString(DataLayerContract.KEY_ITEMS)
+                    when (item.uri.path) {
+                        DataLayerContract.PATH_SUBSCRIPTIONS -> {
+                            Log.d(TAG, "Read existing subscriptions from Data Layer")
+                            SyncedSubscriptions.update(json)
+                        }
+                        DataLayerContract.PATH_WATCH_EPISODES -> {
+                            Log.d(TAG, "Read existing watch episodes from Data Layer")
+                            SyncedWatchEpisodes.update(json)
+                        }
                     }
                 }
                 items.release()
@@ -64,11 +71,17 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
     override fun onDataChanged(events: DataEventBuffer) {
         for (event in events) {
             if (event.type != DataEvent.TYPE_CHANGED) continue
-            if (event.dataItem.uri.path == DataLayerContract.PATH_SUBSCRIPTIONS) {
-                val dataMap = DataMapItem.fromDataItem(event.dataItem).dataMap
-                val json = dataMap.getString(DataLayerContract.KEY_ITEMS)
-                Log.d(TAG, "Live data change: subscriptions updated")
-                SyncedSubscriptions.update(json)
+            val dataMap = DataMapItem.fromDataItem(event.dataItem).dataMap
+            val json = dataMap.getString(DataLayerContract.KEY_ITEMS)
+            when (event.dataItem.uri.path) {
+                DataLayerContract.PATH_SUBSCRIPTIONS -> {
+                    Log.d(TAG, "Live data change: subscriptions updated")
+                    SyncedSubscriptions.update(json)
+                }
+                DataLayerContract.PATH_WATCH_EPISODES -> {
+                    Log.d(TAG, "Live data change: watch episodes updated")
+                    SyncedWatchEpisodes.update(json)
+                }
             }
         }
     }
@@ -82,19 +95,36 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
 fun PodcatchApp() {
     PodcatchTheme {
         Scaffold(timeText = { TimeText() }) {
-            val synced by SyncedSubscriptions.titles.collectAsState()
-            val subscriptions = synced.ifEmpty {
-                listOf("Waiting for sync…")
-            }
+            val episodes by SyncedWatchEpisodes.episodes.collectAsState()
             ScalingLazyColumn(modifier = Modifier.fillMaxSize()) {
-                items(subscriptions) { title ->
-                    Card(
-                        onClick = { /* TODO: open episode list */ },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                    ) {
-                        Text(text = title, style = MaterialTheme.typography.body1)
+                if (episodes.isEmpty()) {
+                    item {
+                        Text(
+                            text = "No episodes queued",
+                            style = MaterialTheme.typography.body1,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        )
+                    }
+                } else {
+                    items(episodes, key = { it.guid }) { episode ->
+                        Card(
+                            onClick = { /* TODO: play episode */ },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                        ) {
+                            Text(text = episode.title, style = MaterialTheme.typography.body1)
+                            Text(
+                                text = episode.podcastTitle,
+                                style = MaterialTheme.typography.caption2,
+                            )
+                            if (episode.duration.isNotBlank()) {
+                                Text(
+                                    text = episode.duration,
+                                    style = MaterialTheme.typography.caption3,
+                                )
+                            }
+                        }
                     }
                 }
             }

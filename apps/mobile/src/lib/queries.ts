@@ -10,6 +10,7 @@ import {
   getCachedEpisodes,
   getDownloadItem,
   getDownloads,
+  getSubscriptions,
   getWatchList,
   isOnWatchList,
   removeFromDownloads,
@@ -147,7 +148,23 @@ export function useWatchListMutations() {
 
   function triggerSync() {
     const list = getWatchList();
-    syncWatchEpisodes(list).catch(() => {});
+    const enriched = list.flatMap((wi) => {
+      const episodes = getCachedEpisodes(wi.podcastId);
+      const episode = episodes?.find((e) => e.guid === wi.episodeGuid);
+      if (!episode) return [];
+      const podcast = getSubscriptions().find((s) => s.id === wi.podcastId);
+      return [{
+        guid: episode.guid,
+        title: episode.title,
+        podcastTitle: podcast?.title ?? '',
+        podcastId: wi.podcastId,
+        audioUrl: episode.audioUrl ?? '',
+        duration: episode.duration ?? '',
+        pubDate: episode.pubDate ?? '',
+        artworkUrl: episode.imageUrl ?? podcast?.artworkUrl ?? '',
+      }];
+    });
+    syncWatchEpisodes(enriched).catch(() => {});
   }
 
   const add = useMutation({

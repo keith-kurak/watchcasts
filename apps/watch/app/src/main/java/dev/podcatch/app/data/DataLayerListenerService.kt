@@ -20,12 +20,18 @@ class DataLayerListenerService : WearableListenerService() {
         for (event in events) {
             if (event.type != DataEvent.TYPE_CHANGED) continue
             val item = event.dataItem
-            if (item.uri.path == DataLayerContract.PATH_SUBSCRIPTIONS) {
-                val dataMap = DataMapItem.fromDataItem(item).dataMap
-                val json = dataMap.getString(DataLayerContract.KEY_ITEMS)
-                val updatedAt = dataMap.getLong(DataLayerContract.KEY_UPDATED_AT)
-                Log.d(TAG, "Subscriptions synced (updatedAt=$updatedAt)")
-                SyncedSubscriptions.update(json)
+            val dataMap = DataMapItem.fromDataItem(item).dataMap
+            val json = dataMap.getString(DataLayerContract.KEY_ITEMS)
+            val updatedAt = dataMap.getLong(DataLayerContract.KEY_UPDATED_AT)
+            when (item.uri.path) {
+                DataLayerContract.PATH_SUBSCRIPTIONS -> {
+                    Log.d(TAG, "Subscriptions synced (updatedAt=$updatedAt)")
+                    SyncedSubscriptions.update(json)
+                }
+                DataLayerContract.PATH_WATCH_EPISODES -> {
+                    Log.d(TAG, "Watch episodes synced (updatedAt=$updatedAt)")
+                    SyncedWatchEpisodes.update(json)
+                }
             }
         }
     }

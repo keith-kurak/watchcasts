@@ -31,3 +31,4 @@ apps/watch/*.iml
 .DS_Store
 *.log
 .env*.local
+apps/mobile/modules/wear-data-layer/android/build/*

@@ -10,6 +10,7 @@ package dev.podcatch.app.data
 object DataLayerContract {
     // DataClient item paths (persistent, replicated DataItems)
     const val PATH_SUBSCRIPTIONS = "/podcatch/subscriptions"
+    const val PATH_WATCH_EPISODES = "/podcatch/watch-episodes"
 
     // MessageClient paths (transient RPC)
     const val PATH_REQUEST_SYNC = "/podcatch/request-sync"
