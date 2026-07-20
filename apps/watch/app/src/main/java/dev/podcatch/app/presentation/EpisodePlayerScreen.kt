@@ -10,7 +10,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.WearUnsuitableOutputPlaybackSuppressionResolverListener
 import com.google.android.horologist.annotations.ExperimentalHorologistApi
 import com.google.android.horologist.audio.SystemAudioRepository
 import com.google.android.horologist.audio.ui.VolumeViewModel
@@ -93,7 +96,18 @@ class EpisodePlayerViewModel(
     private val exoPlayer: ExoPlayer = ExoPlayer.Builder(application)
         .setSeekForwardIncrementMs(10_000L)
         .setSeekBackIncrementMs(10_000L)
+        .setAudioAttributes(
+            AudioAttributes.Builder()
+                .setUsage(C.USAGE_MEDIA)
+                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                .build(),
+            /* handleAudioFocus = */ true,
+        )
+        .setSuppressPlaybackOnUnsuitableOutput(true)
         .build()
+        .also {
+            it.addListener(WearUnsuitableOutputPlaybackSuppressionResolverListener(application))
+        }
 
     init {
         viewModelScope.launch {
