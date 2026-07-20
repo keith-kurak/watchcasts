@@ -1,0 +1,20 @@
+{
+  "cli": {
+    "version": ">= 21.0.2"
+  },
+  "build": {
+    "preview": {
+      "android": {
+        "config": "watch.yml",
+        "buildArtifactPaths": ["apps/watch/app/build/outputs/**/*.apk"]
+      },
+      "distribution": "internal"
+    },
+    "production-watch": {
+      "android": {
+        "config": "watch.yml",
+        "buildArtifactPaths": ["apps/watch/app/build/outputs/**/*.apk"]
+      }
+    }
+  }
+}
