@@ -1,7 +1,7 @@
 package dev.podcatch.app.presentation
 
 import android.app.Application
-import android.content.Context
+import android.content.ComponentName
 import android.os.Vibrator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -11,10 +11,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.media3.common.AudioAttributes
-import androidx.media3.common.C
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.WearUnsuitableOutputPlaybackSuppressionResolverListener
+import androidx.concurrent.futures.await
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionToken
 import com.google.android.horologist.annotations.ExperimentalHorologistApi
 import com.google.android.horologist.audio.SystemAudioRepository
 import com.google.android.horologist.audio.ui.VolumeViewModel
@@ -27,6 +26,8 @@ import com.google.android.horologist.media.ui.screens.player.PlayerScreen
 import com.google.android.horologist.media.ui.state.PlayerViewModel
 import dev.podcatch.app.data.SyncedWatchEpisodes
 import dev.podcatch.app.data.WatchEpisode
+import dev.podcatch.app.playback.PlaybackService
+import dev.podcatch.app.playback.PlaybackState
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalHorologistApi::class)
@@ -94,27 +95,35 @@ class EpisodePlayerViewModel(
     private val repository: PlayerRepositoryImpl = PlayerRepositoryImpl(),
 ) : PlayerViewModel(repository) {
 
-    private val prefs = application.getSharedPreferences("playback", Context.MODE_PRIVATE)
-
-    private val exoPlayer: ExoPlayer = ExoPlayer.Builder(application)
-        .setSeekForwardIncrementMs(10_000L)
-        .setSeekBackIncrementMs(10_000L)
-        .setAudioAttributes(
-            AudioAttributes.Builder()
-                .setUsage(C.USAGE_MEDIA)
-                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-                .build(),
-            /* handleAudioFocus = */ true,
-        )
-        .setSuppressPlaybackOnUnsuitableOutput(true)
-        .build()
-        .also {
-            it.addListener(WearUnsuitableOutputPlaybackSuppressionResolverListener(application))
-        }
+    private var controller: MediaController? = null
 
     init {
+        PlaybackState.init(application)
+
         viewModelScope.launch {
-            repository.connect(exoPlayer) {}
+            val sessionToken = SessionToken(
+                application,
+                ComponentName(application, PlaybackService::class.java),
+            )
+            val ctrl = MediaController.Builder(application, sessionToken)
+                .buildAsync()
+                .await()
+            controller = ctrl
+
+            // If the service is already playing this episode, just reconnect
+            // the UI without resetting playback.
+            if (PlaybackState.currentGuid == episode.guid) {
+                repository.connect(ctrl) {}
+                return@launch
+            }
+
+            // Save position of the currently playing episode before switching
+            val prevGuid = PlaybackState.currentGuid
+            if (prevGuid != null && ctrl.currentPosition > 0L) {
+                PlaybackState.savePosition(prevGuid, ctrl.currentPosition)
+            }
+
+            repository.connect(ctrl) {}
             repository.setMedia(
                 Media(
                     id = episode.guid,
@@ -123,19 +132,24 @@ class EpisodePlayerViewModel(
                     artist = episode.podcastTitle,
                 ),
             )
-            val savedPosition = prefs.getLong("position:${episode.guid}", 0L)
+
+            PlaybackState.setCurrentEpisode(episode.guid)
+
+            // Restore saved position for this episode
+            val savedPosition = PlaybackState.getSavedPosition(episode.guid)
             if (savedPosition > 0L) {
-                exoPlayer.seekTo(savedPosition)
+                ctrl.seekTo(savedPosition)
             }
         }
     }
 
     override fun onCleared() {
-        val position = exoPlayer.currentPosition
-        if (position > 0L) {
-            prefs.edit().putLong("position:${episode.guid}", position).apply()
+        // Save position of current episode
+        controller?.let { ctrl ->
+            if (PlaybackState.currentGuid == episode.guid && ctrl.isConnected) {
+                PlaybackState.savePosition(episode.guid, ctrl.currentPosition)
+            }
         }
         super.onCleared()
-        exoPlayer.release()
     }
 }

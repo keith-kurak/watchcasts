@@ -160,6 +160,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
 
 private fun enqueueEpisodeDownload(context: android.content.Context, episode: WatchEpisode) {
     if (episode.audioUrl.isBlank()) return
+    android.widget.Toast.makeText(context, "Downloading…", android.widget.Toast.LENGTH_SHORT).show()
     val constraints = Constraints.Builder()
         .setRequiredNetworkType(NetworkType.CONNECTED)
         .build()

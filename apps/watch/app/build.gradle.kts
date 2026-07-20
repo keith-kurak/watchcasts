@@ -93,5 +93,6 @@ dependencies {
 
     // Media3 ExoPlayer for local audio playback
     implementation(libs.media3.exoplayer)
+    implementation(libs.media3.session)
     implementation(libs.media3.ui)
 }
