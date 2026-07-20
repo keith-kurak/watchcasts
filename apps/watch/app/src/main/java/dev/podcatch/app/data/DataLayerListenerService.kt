@@ -6,11 +6,12 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
-import androidx.work.workDataOf
 import com.google.android.gms.wearable.DataEvent
 import com.google.android.gms.wearable.DataEventBuffer
 import com.google.android.gms.wearable.DataMapItem
+import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.WearableListenerService
+import java.io.File
 
 class DataLayerListenerService : WearableListenerService() {
 
@@ -28,6 +29,7 @@ class DataLayerListenerService : WearableListenerService() {
                 }
                 DataLayerContract.PATH_WATCH_EPISODES -> {
                     Log.d(TAG, "Watch episodes synced (updatedAt=$updatedAt)")
+                    SyncedWatchEpisodes.episodesDir = File(applicationContext.filesDir, "episodes")
                     SyncedWatchEpisodes.update(json)
                     enqueueDownloads()
                 }
@@ -35,32 +37,35 @@ class DataLayerListenerService : WearableListenerService() {
         }
     }
 
+    override fun onMessageReceived(messageEvent: MessageEvent) {
+        when (messageEvent.path) {
+            DataLayerContract.PATH_REQUEST_SYNC -> {
+                Log.d(TAG, "Received force-download request from phone")
+                SyncedWatchEpisodes.episodesDir = File(applicationContext.filesDir, "episodes")
+                enqueueDownloads()
+            }
+        }
+    }
+
     private fun enqueueDownloads() {
+        val hasUndownloaded = SyncedWatchEpisodes.episodes.value
+            .any { it.localPath == null && it.audioUrl.isNotBlank() }
+        if (!hasUndownloaded) return
+
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
 
-        for (episode in SyncedWatchEpisodes.episodes.value) {
-            if (episode.localPath != null) continue
-            if (episode.audioUrl.isBlank()) continue
+        val request = OneTimeWorkRequestBuilder<EpisodeDownloadWorker>()
+            .setConstraints(constraints)
+            .build()
 
-            val request = OneTimeWorkRequestBuilder<EpisodeDownloadWorker>()
-                .setInputData(
-                    workDataOf(
-                        EpisodeDownloadWorker.KEY_GUID to episode.guid,
-                        EpisodeDownloadWorker.KEY_AUDIO_URL to episode.audioUrl,
-                    )
-                )
-                .setConstraints(constraints)
-                .build()
-
-            WorkManager.getInstance(applicationContext).enqueueUniqueWork(
-                "download-${episode.guid}",
-                ExistingWorkPolicy.KEEP,
-                request,
-            )
-            Log.d(TAG, "Enqueued download for ${episode.guid}")
-        }
+        WorkManager.getInstance(applicationContext).enqueueUniqueWork(
+            EpisodeDownloadWorker.UNIQUE_WORK_NAME,
+            ExistingWorkPolicy.KEEP,
+            request,
+        )
+        Log.d(TAG, "Enqueued episode download worker")
     }
 
     companion object {

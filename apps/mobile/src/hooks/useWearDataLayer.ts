@@ -19,6 +19,12 @@ export async function syncWatchEpisodes(
   await WearDataLayerModule.syncWatchEpisodes(JSON.stringify(episodes));
 }
 
+/** Send a message to the watch to force-download any undownloaded episodes. */
+export async function sendForceDownload(): Promise<void> {
+  if (!isAndroid) return;
+  await WearDataLayerModule.sendForceDownload();
+}
+
 /** Get the list of currently connected Wear OS nodes (watches). */
 export async function getConnectedNodes(): Promise<
   { id: string; displayName: string }[]

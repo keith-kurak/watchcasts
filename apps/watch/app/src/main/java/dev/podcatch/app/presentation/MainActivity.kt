@@ -51,7 +51,6 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
-import androidx.work.workDataOf
 import coil.compose.AsyncImage
 import com.google.android.gms.wearable.DataClient
 import com.google.android.gms.wearable.DataEvent
@@ -126,31 +125,24 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
     }
 
     private fun enqueueDownloads() {
+        val hasUndownloaded = SyncedWatchEpisodes.episodes.value
+            .any { it.localPath == null && it.audioUrl.isNotBlank() }
+        if (!hasUndownloaded) return
+
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
 
-        for (episode in SyncedWatchEpisodes.episodes.value) {
-            if (episode.localPath != null) continue
-            if (episode.audioUrl.isBlank()) continue
+        val request = OneTimeWorkRequestBuilder<EpisodeDownloadWorker>()
+            .setConstraints(constraints)
+            .build()
 
-            val request = OneTimeWorkRequestBuilder<EpisodeDownloadWorker>()
-                .setInputData(
-                    workDataOf(
-                        EpisodeDownloadWorker.KEY_GUID to episode.guid,
-                        EpisodeDownloadWorker.KEY_AUDIO_URL to episode.audioUrl,
-                    )
-                )
-                .setConstraints(constraints)
-                .build()
-
-            WorkManager.getInstance(this).enqueueUniqueWork(
-                "download-${episode.guid}",
-                ExistingWorkPolicy.KEEP,
-                request,
-            )
-            Log.d(TAG, "Enqueued download for ${episode.guid}")
-        }
+        WorkManager.getInstance(this).enqueueUniqueWork(
+            EpisodeDownloadWorker.UNIQUE_WORK_NAME,
+            ExistingWorkPolicy.KEEP,
+            request,
+        )
+        Log.d(TAG, "Enqueued episode download worker")
     }
 
     companion object {
@@ -165,16 +157,10 @@ private fun enqueueEpisodeDownload(context: android.content.Context, episode: Wa
         .setRequiredNetworkType(NetworkType.CONNECTED)
         .build()
     val request = OneTimeWorkRequestBuilder<EpisodeDownloadWorker>()
-        .setInputData(
-            workDataOf(
-                EpisodeDownloadWorker.KEY_GUID to episode.guid,
-                EpisodeDownloadWorker.KEY_AUDIO_URL to episode.audioUrl,
-            )
-        )
         .setConstraints(constraints)
         .build()
     WorkManager.getInstance(context).enqueueUniqueWork(
-        "download-${episode.guid}",
+        EpisodeDownloadWorker.UNIQUE_WORK_NAME,
         ExistingWorkPolicy.KEEP,
         request,
     )

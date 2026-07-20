@@ -12,7 +12,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { formatDate, formatDuration } from '@/lib/format';
 import { useWatchListQuery, useWatchListMutations, type EnrichedDownloadItem } from '@/lib/queries';
 import { getSubscriptions } from '@/lib/storage';
-import { getConnectedNodes } from '@/hooks/useWearDataLayer';
+import { getConnectedNodes, sendForceDownload } from '@/hooks/useWearDataLayer';
 
 export default function WatchScreen() {
   const router = useRouter();
@@ -37,6 +37,7 @@ export default function WatchScreen() {
   const handleRefresh = useCallback(() => {
     checkConnection();
     triggerSync();
+    sendForceDownload().catch(() => {});
   }, [checkConnection, triggerSync]);
 
   function renderItem({ item }: { item: EnrichedDownloadItem }) {

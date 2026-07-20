@@ -4,68 +4,80 @@ import android.content.Context
 import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import androidx.work.workDataOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.URL
 
+/**
+ * Downloads undownloaded episodes one at a time, sequentially.
+ * Enqueued as unique work ("episode-downloads") with KEEP policy so only
+ * one instance runs at a time. Loops until all episodes are downloaded.
+ */
 class EpisodeDownloadWorker(
     context: Context,
     params: WorkerParameters,
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-        val guid = inputData.getString(KEY_GUID) ?: return@withContext Result.failure()
-        val audioUrl = inputData.getString(KEY_AUDIO_URL) ?: return@withContext Result.failure()
+        val dir = File(applicationContext.filesDir, "episodes")
+        dir.mkdirs()
 
-        try {
-            val dir = File(applicationContext.filesDir, "episodes")
-            dir.mkdirs()
-            val outFile = File(dir, "$guid.mp3")
+        // Initialize episodesDir so disk checks work
+        SyncedWatchEpisodes.episodesDir = dir
 
-            val connection = URL(audioUrl).openConnection()
-            val totalBytes = connection.contentLength
-            val input = connection.getInputStream()
-            val output = outFile.outputStream()
+        while (true) {
+            val episode = SyncedWatchEpisodes.episodes.value
+                .firstOrNull { it.localPath == null && it.audioUrl.isNotBlank() }
+                ?: break // All done
 
-            input.use { src ->
-                output.use { dst ->
-                    val buffer = ByteArray(8192)
-                    var bytesRead: Long = 0
-                    var lastReportedProgress = -1
+            Log.d(TAG, "Downloading episode ${episode.guid}")
+            try {
+                val outFile = File(dir, "${episode.guid}.mp3")
 
-                    while (true) {
-                        val read = src.read(buffer)
-                        if (read == -1) break
-                        dst.write(buffer, 0, read)
-                        bytesRead += read
+                val connection = URL(episode.audioUrl).openConnection()
+                val totalBytes = connection.contentLength
+                val input = connection.getInputStream()
+                val output = outFile.outputStream()
 
-                        if (totalBytes > 0) {
-                            val progress = ((bytesRead * 100) / totalBytes).toInt().coerceIn(0, 99)
-                            if (progress != lastReportedProgress) {
-                                lastReportedProgress = progress
-                                SyncedWatchEpisodes.updateProgress(guid, progress)
-                                setProgress(workDataOf(KEY_PROGRESS to progress))
+                input.use { src ->
+                    output.use { dst ->
+                        val buffer = ByteArray(8192)
+                        var bytesRead: Long = 0
+                        var lastReportedProgress = -1
+
+                        while (true) {
+                            val read = src.read(buffer)
+                            if (read == -1) break
+                            dst.write(buffer, 0, read)
+                            bytesRead += read
+
+                            if (totalBytes > 0) {
+                                val progress = ((bytesRead * 100) / totalBytes).toInt().coerceIn(0, 99)
+                                if (progress != lastReportedProgress) {
+                                    lastReportedProgress = progress
+                                    SyncedWatchEpisodes.updateProgress(episode.guid, progress)
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            SyncedWatchEpisodes.markDownloaded(guid, outFile.absolutePath)
-            Log.d(TAG, "Downloaded episode $guid to ${outFile.absolutePath}")
-            Result.success()
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to download episode $guid", e)
-            Result.retry()
+                SyncedWatchEpisodes.markDownloaded(episode.guid, outFile.absolutePath)
+                Log.d(TAG, "Downloaded episode ${episode.guid} to ${outFile.absolutePath}")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to download episode ${episode.guid}", e)
+                // Retry the whole worker (will pick up where it left off)
+                return@withContext Result.retry()
+            }
         }
+
+        Log.d(TAG, "All episodes downloaded")
+        Result.success()
     }
 
     companion object {
         private const val TAG = "EpisodeDownload"
-        const val KEY_GUID = "guid"
-        const val KEY_AUDIO_URL = "audioUrl"
-        const val KEY_PROGRESS = "progress"
+        const val UNIQUE_WORK_NAME = "episode-downloads"
     }
 }

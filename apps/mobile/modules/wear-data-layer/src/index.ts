@@ -8,6 +8,7 @@ interface WearNode {
 declare class WearDataLayerModule extends NativeModule<{}> {
   syncSubscriptions(json: string): Promise<void>;
   syncWatchEpisodes(json: string): Promise<void>;
+  sendForceDownload(): Promise<void>;
   getConnectedNodes(): Promise<WearNode[]>;
 }
 
