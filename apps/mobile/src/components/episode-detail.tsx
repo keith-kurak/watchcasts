@@ -13,7 +13,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { useAudio } from '@/lib/audio-context';
 import { formatDate, formatDuration, parseDurationToSeconds, stripHtml } from '@/lib/format';
 import { useIsInDownloads } from '@/lib/queries';
-import { getCachedEpisodes, getSubscriptions } from '@/lib/storage';
+import { getCachedEpisodes, getPlaybackProgress, getSubscriptions } from '@/lib/storage';
 import type { Episode, Podcast } from '@/lib/types';
 
 function formatSeconds(s: number): string {
@@ -51,8 +51,9 @@ export function EpisodeDetail({ episodeId, podcastId }: EpisodeDetailProps) {
 
   const imageUri = episode.imageUrl ?? podcast?.artworkUrl;
   const episodeDuration = parseDurationToSeconds(episode.duration);
+  const savedProgress = !isThisEpisode ? getPlaybackProgress(episode.guid) : null;
   const activeDuration = isThisEpisode && status.duration > 0 ? status.duration : episodeDuration;
-  const currentTime = isThisEpisode ? status.currentTime : 0;
+  const currentTime = isThisEpisode ? status.currentTime : (savedProgress?.position ?? 0);
   const progress = activeDuration > 0 ? currentTime / activeDuration : 0;
 
   const isDownloaded = downloadItem?.status === 'complete';
