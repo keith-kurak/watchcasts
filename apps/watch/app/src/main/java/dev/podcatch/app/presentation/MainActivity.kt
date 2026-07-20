@@ -1,5 +1,6 @@
 package dev.podcatch.app.presentation
 
+import android.net.Uri
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -40,6 +41,9 @@ import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.Scaffold
 import androidx.wear.compose.material.Text
 import androidx.wear.compose.material.TimeText
+import androidx.wear.compose.navigation.SwipeDismissableNavHost
+import androidx.wear.compose.navigation.composable
+import androidx.wear.compose.navigation.rememberSwipeDismissableNavController
 import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
@@ -174,88 +178,111 @@ private fun enqueueEpisodeDownload(context: android.content.Context, episode: Wa
 @Composable
 fun PodcatchApp() {
     PodcatchTheme {
+        val navController = rememberSwipeDismissableNavController()
         Scaffold(timeText = { TimeText() }) {
-            val episodes by SyncedWatchEpisodes.episodes.collectAsState()
-            ScalingLazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(top = 32.dp, start = 8.dp, end = 8.dp),
+            SwipeDismissableNavHost(
+                navController = navController,
+                startDestination = "episodeList",
             ) {
-                if (episodes.isEmpty()) {
-                    item {
-                        Text(
-                            text = "No episodes queued",
-                            style = MaterialTheme.typography.body1,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        )
-                    }
-                } else {
-                    items(episodes, key = { it.guid }) { episode ->
-                        val isDownloaded = episode.localPath != null
-                        val context = LocalContext.current
-                        Card(
-                            onClick = {
-                                if (isDownloaded) {
-                                    /* TODO: play episode */
-                                } else {
-                                    enqueueEpisodeDownload(context, episode)
-                                }
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 2.dp)
-                                .alpha(if (isDownloaded) 1f else 0.6f),
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (episode.artworkUrl.isNotBlank()) {
-                                    AsyncImage(
-                                        model = episode.artworkUrl,
-                                        contentDescription = episode.podcastTitle,
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .clip(RoundedCornerShape(6.dp)),
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                }
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = episode.title,
-                                        style = MaterialTheme.typography.body2,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.basicMarquee(
-                                            animationMode = MarqueeAnimationMode.WhileFocused,
-                                        ),
-                                    )
-                                    Text(
-                                        text = episode.podcastTitle,
-                                        style = MaterialTheme.typography.caption2,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(6.dp))
-                                if (isDownloaded) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.CheckCircle,
-                                        contentDescription = "Downloaded",
-                                        tint = Color(0xFF4CAF50),
-                                        modifier = Modifier.size(18.dp),
-                                    )
-                                } else if (episode.downloadProgress > 0) {
-                                    Text(
-                                        text = "${episode.downloadProgress}%",
-                                        style = MaterialTheme.typography.caption3,
-                                    )
-                                } else {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Download,
-                                        contentDescription = "Not downloaded",
-                                        tint = Color.Gray,
-                                        modifier = Modifier.size(18.dp),
-                                    )
-                                }
-                            }
+                composable("episodeList") {
+                    EpisodeListScreen(
+                        onEpisodeClick = { episode ->
+                            navController.navigate(
+                                "player/${Uri.encode(episode.guid)}",
+                            )
+                        },
+                    )
+                }
+                composable("player/{guid}") { backStackEntry ->
+                    val guid = backStackEntry.arguments?.getString("guid") ?: return@composable
+                    EpisodePlayerScreen(guid = Uri.decode(guid))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun EpisodeListScreen(onEpisodeClick: (WatchEpisode) -> Unit) {
+    val episodes by SyncedWatchEpisodes.episodes.collectAsState()
+    ScalingLazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(top = 32.dp, start = 8.dp, end = 8.dp),
+    ) {
+        if (episodes.isEmpty()) {
+            item {
+                Text(
+                    text = "No episodes queued",
+                    style = MaterialTheme.typography.body1,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+            }
+        } else {
+            items(episodes, key = { it.guid }) { episode ->
+                val isDownloaded = episode.localPath != null
+                val context = LocalContext.current
+                Card(
+                    onClick = {
+                        if (isDownloaded) {
+                            onEpisodeClick(episode)
+                        } else {
+                            enqueueEpisodeDownload(context, episode)
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 2.dp)
+                        .alpha(if (isDownloaded) 1f else 0.6f),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (episode.artworkUrl.isNotBlank()) {
+                            AsyncImage(
+                                model = episode.artworkUrl,
+                                contentDescription = episode.podcastTitle,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(6.dp)),
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = episode.title,
+                                style = MaterialTheme.typography.body2,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.basicMarquee(
+                                    animationMode = MarqueeAnimationMode.WhileFocused,
+                                ),
+                            )
+                            Text(
+                                text = episode.podcastTitle,
+                                style = MaterialTheme.typography.caption2,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                        if (isDownloaded) {
+                            Icon(
+                                imageVector = Icons.Rounded.CheckCircle,
+                                contentDescription = "Downloaded",
+                                tint = Color(0xFF4CAF50),
+                                modifier = Modifier.size(18.dp),
+                            )
+                        } else if (episode.downloadProgress > 0) {
+                            Text(
+                                text = "${episode.downloadProgress}%",
+                                style = MaterialTheme.typography.caption3,
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Rounded.Download,
+                                contentDescription = "Not downloaded",
+                                tint = Color.Gray,
+                                modifier = Modifier.size(18.dp),
+                            )
                         }
                     }
                 }

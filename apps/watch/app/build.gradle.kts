@@ -84,4 +84,13 @@ dependencies {
     implementation(libs.play.services.wearable)
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.coil.compose)
+
+    // Horologist media player UI + data
+    implementation(libs.horologist.media.ui)
+    implementation(libs.horologist.media.data)
+    implementation(libs.horologist.audio.ui)
+    implementation(libs.horologist.media)
+
+    // Media3 ExoPlayer for local audio playback
+    implementation(libs.media3.exoplayer)
 }
