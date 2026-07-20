@@ -24,7 +24,7 @@
 
         <uses-library
             android:name="com.google.android.wearable"
-            android:required="true" />
+            android:required="false" />
 
         <activity
             android:name=".presentation.MainActivity"

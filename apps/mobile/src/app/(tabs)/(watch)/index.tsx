@@ -1,5 +1,6 @@
 import { Image } from 'expo-image';
-import { useRouter } from 'expo-router';
+import { SymbolView } from 'expo-symbols';
+import { Stack, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { FlatList, Platform, Pressable, StyleSheet, View } from 'react-native';
 
@@ -9,7 +10,7 @@ import { WatchStatusIcon } from '@/components/playback-status-icon';
 import { NowPlayingBarHeight, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { formatDate, formatDuration } from '@/lib/format';
-import { useWatchListQuery, type EnrichedDownloadItem } from '@/lib/queries';
+import { useWatchListQuery, useWatchListMutations, type EnrichedDownloadItem } from '@/lib/queries';
 import { getSubscriptions } from '@/lib/storage';
 import { getConnectedNodes } from '@/hooks/useWearDataLayer';
 
@@ -18,6 +19,7 @@ export default function WatchScreen() {
   const theme = useTheme();
   const subscriptions = getSubscriptions();
   const { data: watchList = [], isLoading, refetch, isRefetching } = useWatchListQuery(subscriptions);
+  const { triggerSync } = useWatchListMutations();
   const [connected, setConnected] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -68,6 +70,15 @@ export default function WatchScreen() {
 
   return (
     <ThemedView style={styles.container}>
+      <Stack.Screen
+        options={{
+          headerRight: () => (
+            <Pressable onPress={triggerSync}>
+              <SymbolView name="arrow.trianglehead.2.clockwise" size={22} tintColor={theme.text} />
+            </Pressable>
+          ),
+        }}
+      />
       {connected !== null && Platform.OS === 'android' && (
         <View
           style={[

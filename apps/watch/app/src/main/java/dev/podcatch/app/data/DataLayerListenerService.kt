@@ -1,19 +1,17 @@
 package dev.podcatch.app.data
 
 import android.util.Log
+import androidx.work.Constraints
+import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.workDataOf
 import com.google.android.gms.wearable.DataEvent
 import com.google.android.gms.wearable.DataEventBuffer
 import com.google.android.gms.wearable.DataMapItem
 import com.google.android.gms.wearable.WearableListenerService
 
-/**
- * Entry point for everything the phone app pushes over the Data Layer.
- *
- * When the phone updates the subscription DataItem, onDataChanged fires here
- * (even if the watch app isn't in the foreground). This is where you'd persist
- * the synced subscriptions to Room and, separately, enqueue a WorkManager job to
- * download new episodes while the watch is on Wi-Fi + charging.
- */
 class DataLayerListenerService : WearableListenerService() {
 
     override fun onDataChanged(events: DataEventBuffer) {
@@ -31,8 +29,37 @@ class DataLayerListenerService : WearableListenerService() {
                 DataLayerContract.PATH_WATCH_EPISODES -> {
                     Log.d(TAG, "Watch episodes synced (updatedAt=$updatedAt)")
                     SyncedWatchEpisodes.update(json)
+                    enqueueDownloads()
                 }
             }
+        }
+    }
+
+    private fun enqueueDownloads() {
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .build()
+
+        for (episode in SyncedWatchEpisodes.episodes.value) {
+            if (episode.localPath != null) continue
+            if (episode.audioUrl.isBlank()) continue
+
+            val request = OneTimeWorkRequestBuilder<EpisodeDownloadWorker>()
+                .setInputData(
+                    workDataOf(
+                        EpisodeDownloadWorker.KEY_GUID to episode.guid,
+                        EpisodeDownloadWorker.KEY_AUDIO_URL to episode.audioUrl,
+                    )
+                )
+                .setConstraints(constraints)
+                .build()
+
+            WorkManager.getInstance(applicationContext).enqueueUniqueWork(
+                "download-${episode.guid}",
+                ExistingWorkPolicy.KEEP,
+                request,
+            )
+            Log.d(TAG, "Enqueued download for ${episode.guid}")
         }
     }
 

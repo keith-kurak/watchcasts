@@ -14,6 +14,8 @@ data class WatchEpisode(
     val duration: String,
     val pubDate: String,
     val artworkUrl: String,
+    val downloadProgress: Int = 0,
+    val localPath: String? = null,
 )
 
 object SyncedWatchEpisodes {
@@ -22,13 +24,16 @@ object SyncedWatchEpisodes {
 
     fun update(json: String?) {
         if (json == null) return
+        val existing = _episodes.value.associateBy { it.guid }
         val list = mutableListOf<WatchEpisode>()
         val array = JSONArray(json)
         for (i in 0 until array.length()) {
             val obj = array.optJSONObject(i) ?: continue
+            val guid = obj.optString("guid", "")
+            val prev = existing[guid]
             list.add(
                 WatchEpisode(
-                    guid = obj.optString("guid", ""),
+                    guid = guid,
                     title = obj.optString("title", ""),
                     podcastTitle = obj.optString("podcastTitle", ""),
                     podcastId = obj.optString("podcastId", ""),
@@ -36,9 +41,23 @@ object SyncedWatchEpisodes {
                     duration = obj.optString("duration", ""),
                     pubDate = obj.optString("pubDate", ""),
                     artworkUrl = obj.optString("artworkUrl", ""),
+                    downloadProgress = prev?.downloadProgress ?: 0,
+                    localPath = prev?.localPath,
                 )
             )
         }
         _episodes.value = list
+    }
+
+    fun updateProgress(guid: String, progress: Int) {
+        _episodes.value = _episodes.value.map {
+            if (it.guid == guid) it.copy(downloadProgress = progress) else it
+        }
+    }
+
+    fun markDownloaded(guid: String, localPath: String) {
+        _episodes.value = _episodes.value.map {
+            if (it.guid == guid) it.copy(downloadProgress = 100, localPath = localPath) else it
+        }
     }
 }

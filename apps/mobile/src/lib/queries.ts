@@ -189,5 +189,5 @@ export function useWatchListMutations() {
     },
   });
 
-  return { add, remove };
+  return { add, remove, triggerSync };
 }

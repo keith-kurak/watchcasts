@@ -72,6 +72,7 @@ dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.tooling.preview)
+    implementation(libs.androidx.compose.material.icons.extended)
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     // Compose for Wear OS
@@ -82,4 +83,5 @@ dependencies {
     // Phone <-> watch communication + background downloads
     implementation(libs.play.services.wearable)
     implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.coil.compose)
 }
