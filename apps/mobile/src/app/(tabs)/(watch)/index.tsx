@@ -1,7 +1,7 @@
 import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
 import { Stack, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { FlatList, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -22,13 +22,22 @@ export default function WatchScreen() {
   const { triggerSync } = useWatchListMutations();
   const [connected, setConnected] = useState<boolean | null>(null);
 
-  useEffect(() => {
+  const checkConnection = useCallback(() => {
     if (Platform.OS !== 'android') {
       setConnected(null);
       return;
     }
     getConnectedNodes().then((nodes) => setConnected(nodes.length > 0));
   }, []);
+
+  useEffect(() => {
+    checkConnection();
+  }, [checkConnection]);
+
+  const handleRefresh = useCallback(() => {
+    checkConnection();
+    triggerSync();
+  }, [checkConnection, triggerSync]);
 
   function renderItem({ item }: { item: EnrichedDownloadItem }) {
     return (
@@ -73,8 +82,8 @@ export default function WatchScreen() {
       <Stack.Screen
         options={{
           headerRight: () => (
-            <Pressable onPress={triggerSync}>
-              <SymbolView name="arrow.trianglehead.2.clockwise" size={22} tintColor={theme.text} />
+            <Pressable onPress={handleRefresh}>
+              <SymbolView name={{ ios: 'arrow.trianglehead.2.clockwise', android: 'sync' }} size={22} tintColor={theme.text} />
             </Pressable>
           ),
         }}
