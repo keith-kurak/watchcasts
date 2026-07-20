@@ -1,6 +1,7 @@
 package dev.podcatch.app.presentation
 
 import android.app.Application
+import android.content.Context
 import android.os.Vibrator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -89,9 +90,11 @@ fun EpisodePlayerScreen(guid: String, onVolumeClick: () -> Unit) {
 @OptIn(ExperimentalHorologistApi::class)
 class EpisodePlayerViewModel(
     application: Application,
-    episode: WatchEpisode,
+    private val episode: WatchEpisode,
     private val repository: PlayerRepositoryImpl = PlayerRepositoryImpl(),
 ) : PlayerViewModel(repository) {
+
+    private val prefs = application.getSharedPreferences("playback", Context.MODE_PRIVATE)
 
     private val exoPlayer: ExoPlayer = ExoPlayer.Builder(application)
         .setSeekForwardIncrementMs(10_000L)
@@ -120,10 +123,18 @@ class EpisodePlayerViewModel(
                     artist = episode.podcastTitle,
                 ),
             )
+            val savedPosition = prefs.getLong("position:${episode.guid}", 0L)
+            if (savedPosition > 0L) {
+                exoPlayer.seekTo(savedPosition)
+            }
         }
     }
 
     override fun onCleared() {
+        val position = exoPlayer.currentPosition
+        if (position > 0L) {
+            prefs.edit().putLong("position:${episode.guid}", position).apply()
+        }
         super.onCleared()
         exoPlayer.release()
     }
