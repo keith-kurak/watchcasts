@@ -4,6 +4,7 @@
   "private": true,
   "workspaces": [
     "apps/mobile",
+    "apps/watch",
     "packages/*"
   ],
   "scripts": {

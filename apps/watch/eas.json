@@ -3,17 +3,17 @@
     "version": ">= 21.0.2"
   },
   "build": {
-    "preview": {
+    "preview-watch": {
       "android": {
-        "config": "watch.yml",
+        "config": "watch-preview.yml",
         "buildArtifactPaths": ["apps/watch/app/build/outputs/**/*.apk"]
       },
       "distribution": "internal"
     },
     "production-watch": {
       "android": {
-        "config": "watch.yml",
-        "buildArtifactPaths": ["apps/watch/app/build/outputs/**/*.apk"]
+        "config": "watch-production.yml",
+        "buildArtifactPaths": ["apps/watch/app/build/outputs/**/*.aab"]
       }
     }
   }
