@@ -40,11 +40,12 @@ class EpisodeDownloadWorker(
             WatchDownloadStatusReporter.reportStatus(applicationContext)
             try {
                 val outFile = File(dir, "${episode.guid}.mp3")
+                val tmpFile = File(dir, "${episode.guid}.mp3.tmp")
 
                 val connection = URL(episode.audioUrl).openConnection()
                 val totalBytes = connection.contentLength
                 val input = connection.getInputStream()
-                val output = outFile.outputStream()
+                val output = tmpFile.outputStream()
 
                 input.use { src ->
                     output.use { dst ->
@@ -75,11 +76,15 @@ class EpisodeDownloadWorker(
                     }
                 }
 
+                // Atomic rename — only a fully downloaded file becomes .mp3
+                tmpFile.renameTo(outFile)
                 SyncedWatchEpisodes.markDownloaded(episode.guid, outFile.absolutePath)
                 WatchDownloadStatusReporter.reportStatus(applicationContext)
                 Log.d(TAG, "Downloaded episode ${episode.guid} to ${outFile.absolutePath}")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to download episode ${episode.guid}", e)
+                // Clean up partial download
+                File(dir, "${episode.guid}.mp3.tmp").delete()
                 SyncedWatchEpisodes.markError(episode.guid)
                 WatchDownloadStatusReporter.reportStatus(applicationContext)
                 // Retry the whole worker (will pick up where it left off)
