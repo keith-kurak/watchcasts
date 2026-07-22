@@ -17,6 +17,7 @@ data class WatchEpisode(
     val artworkUrl: String,
     val downloadProgress: Int = 0,
     val localPath: String? = null,
+    val error: Boolean = false,
 )
 
 object SyncedWatchEpisodes {
@@ -66,7 +67,13 @@ object SyncedWatchEpisodes {
 
     fun markDownloaded(guid: String, localPath: String) {
         _episodes.value = _episodes.value.map {
-            if (it.guid == guid) it.copy(downloadProgress = 100, localPath = localPath) else it
+            if (it.guid == guid) it.copy(downloadProgress = 100, localPath = localPath, error = false) else it
+        }
+    }
+
+    fun markError(guid: String) {
+        _episodes.value = _episodes.value.map {
+            if (it.guid == guid) it.copy(error = true) else it
         }
     }
 }

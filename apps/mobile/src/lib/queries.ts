@@ -18,6 +18,7 @@ import {
   setCachedEpisodes,
 } from './storage';
 import type { DownloadStatus, Episode, Podcast } from './types';
+import type { WatchEpisodeStatus } from '../../modules/wear-data-layer/src';
 
 export function useFeedQuery(podcastId: string, feedUrl: string) {
   return useQuery({
@@ -38,6 +39,7 @@ export interface EnrichedDownloadItem {
   podcast: Podcast | undefined;
   status: DownloadStatus;
   localPath?: string;
+  progress?: number;
 }
 
 export function useDownloadsQuery(subscriptions: Podcast[]) {
@@ -112,9 +114,12 @@ export function useDownloadMutations() {
   return { add, remove };
 }
 
-export function useWatchListQuery(subscriptions: Podcast[]) {
+export function useWatchListQuery(
+  subscriptions: Podcast[],
+  watchStatuses?: Map<string, WatchEpisodeStatus>,
+) {
   return useQuery({
-    queryKey: ['watchList'],
+    queryKey: ['watchList', watchStatuses ? Array.from(watchStatuses.values()) : null],
     queryFn: () => {
       const list = getWatchList();
       const items: EnrichedDownloadItem[] = [];
@@ -123,12 +128,17 @@ export function useWatchListQuery(subscriptions: Podcast[]) {
         const episode = episodes?.find((e) => e.guid === wi.episodeGuid);
         if (!episode) continue;
         const podcast = subscriptions.find((s) => s.id === wi.podcastId);
+        const ws = watchStatuses?.get(wi.episodeGuid);
+        // If the watch hasn't reported any statuses yet, fall back to 'complete'
+        // (old behavior). Only show 'pending' when the watch is actively reporting.
+        const fallbackStatus: DownloadStatus = watchStatuses && watchStatuses.size > 0 ? 'pending' : 'complete';
         items.push({
           episodeGuid: wi.episodeGuid,
           podcastId: wi.podcastId,
           episode,
           podcast,
-          status: 'complete', // watch list items don't have download status
+          status: ws?.status ?? fallbackStatus,
+          progress: ws?.progress,
         });
       }
       return items;

@@ -28,10 +28,11 @@ class EpisodeDownloadWorker(
 
         while (true) {
             val episode = SyncedWatchEpisodes.episodes.value
-                .firstOrNull { it.localPath == null && it.audioUrl.isNotBlank() }
+                .firstOrNull { it.localPath == null && !it.error && it.audioUrl.isNotBlank() }
                 ?: break // All done
 
             Log.d(TAG, "Downloading episode ${episode.guid}")
+            WatchDownloadStatusReporter.reportStatus(applicationContext)
             try {
                 val outFile = File(dir, "${episode.guid}.mp3")
 
@@ -45,6 +46,7 @@ class EpisodeDownloadWorker(
                         val buffer = ByteArray(8192)
                         var bytesRead: Long = 0
                         var lastReportedProgress = -1
+                        var lastReportedToPhone = -1
 
                         while (true) {
                             val read = src.read(buffer)
@@ -57,6 +59,11 @@ class EpisodeDownloadWorker(
                                 if (progress != lastReportedProgress) {
                                     lastReportedProgress = progress
                                     SyncedWatchEpisodes.updateProgress(episode.guid, progress)
+                                    // Throttle phone reports to every 5%
+                                    if (progress / 5 != lastReportedToPhone / 5) {
+                                        lastReportedToPhone = progress
+                                        WatchDownloadStatusReporter.reportStatus(applicationContext)
+                                    }
                                 }
                             }
                         }
@@ -64,15 +71,19 @@ class EpisodeDownloadWorker(
                 }
 
                 SyncedWatchEpisodes.markDownloaded(episode.guid, outFile.absolutePath)
+                WatchDownloadStatusReporter.reportStatus(applicationContext)
                 Log.d(TAG, "Downloaded episode ${episode.guid} to ${outFile.absolutePath}")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to download episode ${episode.guid}", e)
+                SyncedWatchEpisodes.markError(episode.guid)
+                WatchDownloadStatusReporter.reportStatus(applicationContext)
                 // Retry the whole worker (will pick up where it left off)
                 return@withContext Result.retry()
             }
         }
 
         Log.d(TAG, "All episodes downloaded")
+        WatchDownloadStatusReporter.reportStatus(applicationContext)
         Result.success()
     }
 

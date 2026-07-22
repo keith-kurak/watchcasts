@@ -5,11 +5,22 @@ interface WearNode {
   displayName: string;
 }
 
-declare class WearDataLayerModule extends NativeModule<{}> {
+export interface WatchEpisodeStatus {
+  guid: string;
+  status: "pending" | "downloading" | "complete" | "error";
+  progress: number;
+}
+
+type WearDataLayerModuleEvents = {
+  onWatchDownloadStatus: (event: { statuses: WatchEpisodeStatus[] }) => void;
+};
+
+declare class WearDataLayerModule extends NativeModule<WearDataLayerModuleEvents> {
   syncSubscriptions(json: string): Promise<void>;
   syncWatchEpisodes(json: string): Promise<void>;
   sendForceDownload(): Promise<void>;
   getConnectedNodes(): Promise<WearNode[]>;
+  getWatchDownloadStatus(): Promise<WatchEpisodeStatus[]>;
 }
 
 export default requireNativeModule<WearDataLayerModule>("WearDataLayerModule");

@@ -1,5 +1,8 @@
+import { useEffect, useState } from "react";
 import { Platform } from "react-native";
-import WearDataLayerModule from "../../modules/wear-data-layer/src";
+import WearDataLayerModule, {
+  type WatchEpisodeStatus,
+} from "../../modules/wear-data-layer/src";
 
 const isAndroid = Platform.OS === "android";
 
@@ -31,4 +34,35 @@ export async function getConnectedNodes(): Promise<
 > {
   if (!isAndroid) return [];
   return WearDataLayerModule.getConnectedNodes();
+}
+
+/** Get the current watch download statuses (one-shot read). */
+export async function getWatchDownloadStatus(): Promise<WatchEpisodeStatus[]> {
+  if (!isAndroid) return [];
+  return WearDataLayerModule.getWatchDownloadStatus();
+}
+
+/** Subscribe to live watch download status updates. Returns a map of guid -> status for easy lookup. */
+export function useWatchDownloadStatusListener(): Map<string, WatchEpisodeStatus> {
+  const [statuses, setStatuses] = useState<Map<string, WatchEpisodeStatus>>(new Map());
+
+  useEffect(() => {
+    if (!isAndroid) return;
+
+    // Load initial state
+    getWatchDownloadStatus().then((list) => {
+      setStatuses(new Map(list.map((s) => [s.guid, s])));
+    }).catch(() => {});
+
+    // Listen for live updates
+    const subscription = WearDataLayerModule.addListener(
+      "onWatchDownloadStatus",
+      (event: { statuses: WatchEpisodeStatus[] }) => {
+        setStatuses(new Map(event.statuses.map((s) => [s.guid, s])));
+      },
+    );
+    return () => subscription.remove();
+  }, []);
+
+  return statuses;
 }
