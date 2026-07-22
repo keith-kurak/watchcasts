@@ -1,0 +1,14 @@
+build:
+  name: Build Watch APK
+  steps:
+    - eas/checkout
+    - eas/inject_android_credentials
+    - run:
+        name: Fix Groovy syntax in KTS file
+        command: |
+          GRADLE_FILE=/home/expo/workingdir/build/apps/watch/android/app/build.gradle.kts
+          sed -i 's/apply from: "\(.*\)"/apply(from = "\1")/' "$GRADLE_FILE"
+    - run:
+        name: Build Watch APK
+        command: cd /home/expo/workingdir/build/apps/watch/android && ./gradlew :app:assembleRelease
+    - eas/find_and_upload_build_artifacts

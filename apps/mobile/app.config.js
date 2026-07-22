@@ -2,19 +2,20 @@
 // ⚠️  SHARED APP IDENTITY — MUST MATCH THE WATCH APP
 //
 // The phone app and the Wear OS app are linked by having the SAME applicationId
-// AND the same signing key. This `applicationId` MUST stay identical to
-// `appId` in apps/watch/gradle.properties, or:
-//   • the Wearable Data Layer will not route messages/data between them, and
-//   • Google Play will reject the second APK uploaded under this package.
-//
-// Single source of truth lives here for the JS side. The Gradle side mirrors it
-// (see apps/watch/gradle.properties). Keep them in sync.
+// AND the same signing key. The watch app's applicationId is set in
+// apps/watch/gradle.properties with an `applicationIdSuffix = "dev"` on its
+// debug build type. Both sides must resolve to the same package per variant:
+//   dev:  com.keithkurak.watchcastsdev
+//   prod: com.keithkurak.watchcasts
 // ─────────────────────────────────────────────────────────────────────────────
-const APPLICATION_ID = "dev.podcatch.app";
+const IS_DEV = (process.env.APP_VARIANT ?? "development") === "development";
+const APPLICATION_ID = IS_DEV
+  ? "com.keithkurak.watchcastsdev"
+  : "com.keithkurak.watchcasts";
 
 module.exports = ({ config }) => ({
   ...config,
-  name: "Podcatch",
+  name: IS_DEV ? "Podcatch (Dev)" : "Podcatch",
   slug: "podcatch",
   version: "1.0.0",
   orientation: "portrait",
