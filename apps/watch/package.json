@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "install-debug": "./install.sh",
     "build-apk": "EAS_DANGEROUS_OVERRIDE_ANDROID_APPLICATION_ID=com.keithkurak.watchcasts eas build --profile preview-watch --platform android"
   },
   "dependencies": {
