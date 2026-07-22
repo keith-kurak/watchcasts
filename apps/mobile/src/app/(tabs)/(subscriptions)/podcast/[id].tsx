@@ -3,6 +3,7 @@ import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 
 import { DownloadToggle } from '@/components/download-toggle';
+import { WatchToggle } from '@/components/watch-toggle';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { NowPlayingBarHeight, Spacing } from '@/constants/theme';
@@ -62,6 +63,7 @@ export default function PodcastScreen() {
                 )}
               </View>
             </View>
+            <WatchToggle podcastId={id} episodeGuid={item.guid} />
             <DownloadToggle podcastId={id} episodeGuid={item.guid} audioUrl={item.audioUrl} />
           </Pressable>
         )}

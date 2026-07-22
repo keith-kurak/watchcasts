@@ -17,14 +17,14 @@ export default function AppTabs() {
         <NativeTabs.Trigger.Icon sf="list.bullet" md="format_list_bulleted" />
       </NativeTabs.Trigger>
 
-      <NativeTabs.Trigger name="(downloads)">
-        <NativeTabs.Trigger.Label>Phone</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon sf="iphone" md="smartphone" />
-      </NativeTabs.Trigger>
-
       <NativeTabs.Trigger name="(watch)">
         <NativeTabs.Trigger.Label>Watch</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf="applewatch" md="watch" />
+      </NativeTabs.Trigger>
+
+      <NativeTabs.Trigger name="(downloads)">
+        <NativeTabs.Trigger.Label>Phone</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf="iphone" md="smartphone" />
       </NativeTabs.Trigger>
     </NativeTabs>
   );

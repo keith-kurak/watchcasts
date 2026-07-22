@@ -79,7 +79,7 @@ export function PhoneStatusIcon({
   return (
     <View style={styles.icon}>
       <SymbolView
-        name={{ ios: 'play.circle', android: 'play_circle' }}
+        name={{ ios: 'iphone', android: 'smartphone' }}
         size={size}
         tintColor={color}
       />
