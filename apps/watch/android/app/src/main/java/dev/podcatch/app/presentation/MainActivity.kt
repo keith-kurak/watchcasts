@@ -138,6 +138,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
 
         val request = OneTimeWorkRequestBuilder<EpisodeDownloadWorker>()
             .setConstraints(constraints)
+            .setExpedited(androidx.work.OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             .build()
 
         WorkManager.getInstance(this).enqueueUniqueWork(
@@ -161,6 +162,7 @@ private fun enqueueEpisodeDownload(context: android.content.Context, episode: Wa
         .build()
     val request = OneTimeWorkRequestBuilder<EpisodeDownloadWorker>()
         .setConstraints(constraints)
+        .setExpedited(androidx.work.OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
         .build()
     WorkManager.getInstance(context).enqueueUniqueWork(
         EpisodeDownloadWorker.UNIQUE_WORK_NAME,

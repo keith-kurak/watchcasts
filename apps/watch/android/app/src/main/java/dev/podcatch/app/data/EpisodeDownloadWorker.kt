@@ -1,8 +1,12 @@
 package dev.podcatch.app.data
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
 import android.util.Log
+import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
+import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -32,6 +36,7 @@ class EpisodeDownloadWorker(
                 ?: break // All done
 
             Log.d(TAG, "Downloading episode ${episode.guid}")
+            SyncedWatchEpisodes.updateProgress(episode.guid, 1)
             WatchDownloadStatusReporter.reportStatus(applicationContext)
             try {
                 val outFile = File(dir, "${episode.guid}.mp3")
@@ -87,8 +92,25 @@ class EpisodeDownloadWorker(
         Result.success()
     }
 
+    override suspend fun getForegroundInfo(): ForegroundInfo {
+        val channelId = "episode_downloads"
+        val manager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (manager.getNotificationChannel(channelId) == null) {
+            manager.createNotificationChannel(
+                NotificationChannel(channelId, "Episode Downloads", NotificationManager.IMPORTANCE_LOW)
+            )
+        }
+        val notification = NotificationCompat.Builder(applicationContext, channelId)
+            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setContentTitle("Downloading episodes")
+            .setSilent(true)
+            .build()
+        return ForegroundInfo(NOTIFICATION_ID, notification)
+    }
+
     companion object {
         private const val TAG = "EpisodeDownload"
+        private const val NOTIFICATION_ID = 1001
         const val UNIQUE_WORK_NAME = "episode-downloads"
     }
 }
