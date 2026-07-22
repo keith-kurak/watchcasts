@@ -20,7 +20,7 @@ declare class WearDataLayerModule extends NativeModule<WearDataLayerModuleEvents
   syncWatchEpisodes(json: string): Promise<void>;
   sendForceDownload(): Promise<void>;
   getConnectedNodes(): Promise<WearNode[]>;
-  getWatchDownloadStatus(): Promise<WatchEpisodeStatus[]>;
+  requestWatchDownloadStatus(): Promise<void>;
 }
 
 export default requireNativeModule<WearDataLayerModule>("WearDataLayerModule");

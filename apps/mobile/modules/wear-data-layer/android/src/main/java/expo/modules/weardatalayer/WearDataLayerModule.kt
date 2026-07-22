@@ -1,10 +1,8 @@
 package expo.modules.weardatalayer
 
 import android.util.Log
-import com.google.android.gms.wearable.DataClient
-import com.google.android.gms.wearable.DataEvent
-import com.google.android.gms.wearable.DataEventBuffer
-import com.google.android.gms.wearable.DataMapItem
+import com.google.android.gms.wearable.MessageClient
+import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.Node
 import com.google.android.gms.wearable.PutDataMapRequest
 import com.google.android.gms.wearable.Wearable
@@ -12,8 +10,8 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.kotlin.Promise
 
-class WearDataLayerModule : Module(), DataClient.OnDataChangedListener {
-    private var dataClient: DataClient? = null
+class WearDataLayerModule : Module(), MessageClient.OnMessageReceivedListener {
+    private var messageClient: MessageClient? = null
 
     override fun definition() = ModuleDefinition {
         Name("WearDataLayerModule")
@@ -22,16 +20,16 @@ class WearDataLayerModule : Module(), DataClient.OnDataChangedListener {
 
         OnStartObserving {
             val context = appContext.reactContext ?: return@OnStartObserving
-            dataClient = Wearable.getDataClient(context).also {
+            messageClient = Wearable.getMessageClient(context).also {
                 it.addListener(this@WearDataLayerModule)
             }
-            Log.d(TAG, "DataClient listener registered")
+            Log.d(TAG, "MessageClient listener registered")
         }
 
         OnStopObserving {
-            dataClient?.removeListener(this@WearDataLayerModule)
-            dataClient = null
-            Log.d(TAG, "DataClient listener removed")
+            messageClient?.removeListener(this@WearDataLayerModule)
+            messageClient = null
+            Log.d(TAG, "MessageClient listener removed")
         }
 
         AsyncFunction("syncSubscriptions") { json: String, promise: Promise ->
@@ -115,40 +113,43 @@ class WearDataLayerModule : Module(), DataClient.OnDataChangedListener {
                 }
         }
 
-        AsyncFunction("getWatchDownloadStatus") { promise: Promise ->
+        AsyncFunction("requestWatchDownloadStatus") { promise: Promise ->
             val context = appContext.reactContext
                 ?: return@AsyncFunction promise.reject("ERR", "No context", null)
-            val client = Wearable.getDataClient(context)
-            client.getDataItems(android.net.Uri.parse("wear://*$PATH_WATCH_DOWNLOAD_STATUS"))
-                .addOnSuccessListener { items ->
-                    if (items.count == 0) {
-                        promise.resolve(emptyList<Any>())
-                        items.release()
+            val nodeClient = Wearable.getNodeClient(context)
+            val msgClient = Wearable.getMessageClient(context)
+            nodeClient.connectedNodes
+                .addOnSuccessListener { nodes: MutableList<Node> ->
+                    if (nodes.isEmpty()) {
+                        promise.resolve(null)
                         return@addOnSuccessListener
                     }
-                    val dataMap = DataMapItem.fromDataItem(items[0]).dataMap
-                    val json = dataMap.getString("statuses") ?: "[]"
-                    items.release()
-                    promise.resolve(parseStatusJson(json))
+                    var pending = nodes.size
+                    for (node in nodes) {
+                        msgClient.sendMessage(node.id, PATH_REQUEST_DOWNLOAD_STATUS, ByteArray(0))
+                            .addOnSuccessListener {
+                                Log.d(TAG, "Requested download status from ${node.displayName}")
+                                if (--pending == 0) promise.resolve(null)
+                            }
+                            .addOnFailureListener { e ->
+                                Log.e(TAG, "Failed to request status from ${node.displayName}", e)
+                                if (--pending == 0) promise.resolve(null)
+                            }
+                    }
                 }
                 .addOnFailureListener { e ->
-                    promise.reject("ERR", e.message ?: "getDataItems failed", e)
+                    promise.reject("ERR", e.message ?: "getConnectedNodes failed", e)
                 }
         }
     }
 
-    override fun onDataChanged(dataEvents: DataEventBuffer) {
-        for (event in dataEvents) {
-            if (event.type != DataEvent.TYPE_CHANGED) continue
-            val item = event.dataItem
-            if (item.uri.path != PATH_WATCH_DOWNLOAD_STATUS) continue
+    override fun onMessageReceived(messageEvent: MessageEvent) {
+        if (messageEvent.path != PATH_WATCH_DOWNLOAD_STATUS) return
 
-            val dataMap = DataMapItem.fromDataItem(item).dataMap
-            val json = dataMap.getString("statuses") ?: "[]"
-            val statuses = parseStatusJson(json)
-            Log.d(TAG, "Watch download status changed: ${statuses.size} episodes")
-            sendEvent("onWatchDownloadStatus", mapOf("statuses" to statuses))
-        }
+        val json = String(messageEvent.data)
+        val statuses = parseStatusJson(json)
+        Log.d(TAG, "Watch download status received: ${statuses.size} episodes")
+        sendEvent("onWatchDownloadStatus", mapOf("statuses" to statuses))
     }
 
     private fun parseStatusJson(json: String): List<Map<String, Any>> {
@@ -169,8 +170,9 @@ class WearDataLayerModule : Module(), DataClient.OnDataChangedListener {
         private const val TAG = "WearDataLayer"
         private const val PATH_SUBSCRIPTIONS = "/podcatch/subscriptions"
         private const val PATH_WATCH_EPISODES = "/podcatch/watch-episodes"
-        private const val PATH_WATCH_DOWNLOAD_STATUS = "/podcatch/watch-download-status"
         private const val PATH_REQUEST_SYNC = "/podcatch/request-sync"
+        private const val PATH_REQUEST_DOWNLOAD_STATUS = "/podcatch/request-download-status"
+        private const val PATH_WATCH_DOWNLOAD_STATUS = "/podcatch/watch-download-status"
         private const val KEY_ITEMS = "items"
         private const val KEY_UPDATED_AT = "updatedAt"
     }

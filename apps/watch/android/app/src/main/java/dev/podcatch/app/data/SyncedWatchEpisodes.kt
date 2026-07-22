@@ -31,10 +31,12 @@ object SyncedWatchEpisodes {
         if (json == null) return
         val existing = _episodes.value.associateBy { it.guid }
         val list = mutableListOf<WatchEpisode>()
+        val newGuids = mutableSetOf<String>()
         val array = JSONArray(json)
         for (i in 0 until array.length()) {
             val obj = array.optJSONObject(i) ?: continue
             val guid = obj.optString("guid", "")
+            newGuids.add(guid)
             val prev = existing[guid]
             // Check in-memory state first, then fall back to checking disk
             val localPath = prev?.localPath ?: run {
@@ -55,6 +57,12 @@ object SyncedWatchEpisodes {
                     localPath = localPath,
                 )
             )
+        }
+        // Delete downloaded files for episodes removed from the watch list
+        for ((guid, ep) in existing) {
+            if (guid !in newGuids && ep.localPath != null) {
+                File(ep.localPath).delete()
+            }
         }
         _episodes.value = list
     }

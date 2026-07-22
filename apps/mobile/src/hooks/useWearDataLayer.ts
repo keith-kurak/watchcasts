@@ -36,10 +36,10 @@ export async function getConnectedNodes(): Promise<
   return WearDataLayerModule.getConnectedNodes();
 }
 
-/** Get the current watch download statuses (one-shot read). */
-export async function getWatchDownloadStatus(): Promise<WatchEpisodeStatus[]> {
-  if (!isAndroid) return [];
-  return WearDataLayerModule.getWatchDownloadStatus();
+/** Ask the watch to send its current download statuses via message. */
+export async function requestWatchDownloadStatus(): Promise<void> {
+  if (!isAndroid) return;
+  await WearDataLayerModule.requestWatchDownloadStatus();
 }
 
 /** Subscribe to live watch download status updates. Returns a map of guid -> status for easy lookup. */
@@ -49,18 +49,17 @@ export function useWatchDownloadStatusListener(): Map<string, WatchEpisodeStatus
   useEffect(() => {
     if (!isAndroid) return;
 
-    // Load initial state
-    getWatchDownloadStatus().then((list) => {
-      setStatuses(new Map(list.map((s) => [s.guid, s])));
-    }).catch(() => {});
-
-    // Listen for live updates
+    // Listen for status messages from the watch
     const subscription = WearDataLayerModule.addListener(
       "onWatchDownloadStatus",
       (event: { statuses: WatchEpisodeStatus[] }) => {
         setStatuses(new Map(event.statuses.map((s) => [s.guid, s])));
       },
     );
+
+    // Request current status from the watch
+    requestWatchDownloadStatus().catch(() => {});
+
     return () => subscription.remove();
   }, []);
 

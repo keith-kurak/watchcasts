@@ -1,7 +1,7 @@
 import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
 import { Stack, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
 import { FlatList, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -11,13 +11,21 @@ import { useTheme } from '@/hooks/use-theme';
 import { formatDate, formatDuration } from '@/lib/format';
 import { useWatchListQuery, useWatchListMutations, type EnrichedDownloadItem } from '@/lib/queries';
 import { getSubscriptions } from '@/lib/storage';
-import { getConnectedNodes, sendForceDownload, useWatchDownloadStatusListener } from '@/hooks/useWearDataLayer';
+import { getConnectedNodes, sendForceDownload, requestWatchDownloadStatus, useWatchDownloadStatusListener } from '@/hooks/useWearDataLayer';
+import type { WatchEpisodeStatus } from '../../modules/wear-data-layer/src';
 
-function WatchRow({ item }: { item: EnrichedDownloadItem }) {
+const WatchRow = memo(function WatchRow({
+  item,
+  watchStatus,
+}: {
+  item: EnrichedDownloadItem;
+  watchStatus: WatchEpisodeStatus | undefined;
+}) {
   const router = useRouter();
   const theme = useTheme();
-  const isDownloading = item.status === 'downloading';
-  const progress = item.progress ?? 0;
+  const status = watchStatus?.status ?? 'pending';
+  const progress = watchStatus?.progress ?? 0;
+  const isDownloading = status === 'downloading';
 
   return (
     <Pressable
@@ -44,17 +52,17 @@ function WatchRow({ item }: { item: EnrichedDownloadItem }) {
               Downloading… {progress > 0 ? `${progress}%` : ''}
             </ThemedText>
           )}
-          {item.status === 'pending' && (
+          {status === 'pending' && (
             <ThemedText type="small" themeColor="textSecondary">
               Waiting…
             </ThemedText>
           )}
-          {item.status === 'error' && (
+          {status === 'error' && (
             <ThemedText type="small" style={{ color: '#FF3B30' }}>
               Error
             </ThemedText>
           )}
-          {item.status === 'complete' && item.episode.pubDate && (
+          {status === 'complete' && item.episode.pubDate && (
             <ThemedText type="small" themeColor="textSecondary">
               {formatDate(item.episode.pubDate)}
             </ThemedText>
@@ -78,14 +86,14 @@ function WatchRow({ item }: { item: EnrichedDownloadItem }) {
       </View>
     </Pressable>
   );
-}
+});
 
 export default function WatchScreen() {
   const router = useRouter();
   const theme = useTheme();
   const subscriptions = getSubscriptions();
   const watchStatuses = useWatchDownloadStatusListener();
-  const { data: watchList = [], isLoading, refetch, isRefetching } = useWatchListQuery(subscriptions, watchStatuses);
+  const { data: watchList = [], isLoading, refetch, isRefetching } = useWatchListQuery(subscriptions);
   const { triggerSync } = useWatchListMutations();
   const [connected, setConnected] = useState<boolean | null>(null);
 
@@ -105,6 +113,7 @@ export default function WatchScreen() {
     checkConnection();
     triggerSync();
     sendForceDownload().catch(() => {});
+    requestWatchDownloadStatus().catch(() => {});
   }, [checkConnection, triggerSync]);
 
   return (
@@ -132,11 +141,14 @@ export default function WatchScreen() {
       )}
       <FlatList
         data={watchList}
+        extraData={watchStatuses}
         keyExtractor={(item) => item.episodeGuid}
         refreshing={isRefetching}
         onRefresh={() => refetch()}
         contentContainerStyle={styles.list}
-        renderItem={({ item }) => <WatchRow item={item} />}
+        renderItem={({ item }) => (
+          <WatchRow item={item} watchStatus={watchStatuses.get(item.episodeGuid)} />
+        )}
         ListEmptyComponent={
           isLoading ? null : (
             <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>

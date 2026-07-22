@@ -2,15 +2,14 @@ package dev.podcatch.app.data
 
 import android.content.Context
 import android.util.Log
-import com.google.android.gms.wearable.PutDataMapRequest
 import com.google.android.gms.wearable.Wearable
 import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Reports watch episode download statuses back to the phone via the Wearable Data Layer.
- * Reads the current state from [SyncedWatchEpisodes] and writes a JSON array to the
- * [DataLayerContract.PATH_WATCH_DOWNLOAD_STATUS] DataItem.
+ * Reports watch episode download statuses back to the phone via MessageClient.
+ * Reads the current state from [SyncedWatchEpisodes] and sends a JSON message
+ * to all connected nodes on [DataLayerContract.PATH_WATCH_DOWNLOAD_STATUS].
  */
 object WatchDownloadStatusReporter {
     private const val TAG = "WatchDLStatus"
@@ -37,13 +36,26 @@ object WatchDownloadStatusReporter {
             })
         }
 
-        val request = PutDataMapRequest.create(DataLayerContract.PATH_WATCH_DOWNLOAD_STATUS).apply {
-            dataMap.putString("statuses", array.toString())
-            dataMap.putLong("updatedAt", System.currentTimeMillis())
-        }.asPutDataRequest().setUrgent()
+        val payload = array.toString().toByteArray()
+        val nodeClient = Wearable.getNodeClient(context)
+        val messageClient = Wearable.getMessageClient(context)
 
-        Wearable.getDataClient(context).putDataItem(request)
-            .addOnSuccessListener { Log.d(TAG, "Reported ${episodes.size} episode statuses") }
-            .addOnFailureListener { e -> Log.e(TAG, "Failed to report statuses", e) }
+        nodeClient.connectedNodes
+            .addOnSuccessListener { nodes ->
+                for (node in nodes) {
+                    messageClient.sendMessage(
+                        node.id,
+                        DataLayerContract.PATH_WATCH_DOWNLOAD_STATUS,
+                        payload,
+                    ).addOnSuccessListener {
+                        Log.d(TAG, "Sent ${episodes.size} episode statuses to ${node.displayName}")
+                    }.addOnFailureListener { e ->
+                        Log.e(TAG, "Failed to send statuses to ${node.displayName}", e)
+                    }
+                }
+            }
+            .addOnFailureListener { e ->
+                Log.e(TAG, "Failed to get connected nodes", e)
+            }
     }
 }

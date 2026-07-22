@@ -11,10 +11,10 @@ object DataLayerContract {
     // DataClient item paths (persistent, replicated DataItems)
     const val PATH_SUBSCRIPTIONS = "/podcatch/subscriptions"
     const val PATH_WATCH_EPISODES = "/podcatch/watch-episodes"
-    const val PATH_WATCH_DOWNLOAD_STATUS = "/podcatch/watch-download-status"
-
     // MessageClient paths (transient RPC)
     const val PATH_REQUEST_SYNC = "/podcatch/request-sync"
+    const val PATH_REQUEST_DOWNLOAD_STATUS = "/podcatch/request-download-status"
+    const val PATH_WATCH_DOWNLOAD_STATUS = "/podcatch/watch-download-status"
 
     // Keys inside the SUBSCRIPTIONS DataMap
     const val KEY_ITEMS = "items"

@@ -18,14 +18,16 @@ export const DataPaths = {
   SUBSCRIPTIONS: "/podcatch/subscriptions",
   /** Episodes explicitly queued for the watch, synced phone -> watch. Payload: { items: WatchEpisode[] }. */
   WATCH_EPISODES: "/podcatch/watch-episodes",
-  /** Download statuses reported watch -> phone. Payload: JSON array of { guid, status, progress }. */
-  WATCH_DOWNLOAD_STATUS: "/podcatch/watch-download-status",
 } as const;
 
 /** MessageClient paths (fire-and-forget RPC — transient). */
 export const MessagePaths = {
   /** Watch -> phone: "I'm on Wi-Fi + charging, send me anything new to download." */
   REQUEST_SYNC: "/podcatch/request-sync",
+  /** Phone -> watch: "Send me your current download statuses." */
+  REQUEST_DOWNLOAD_STATUS: "/podcatch/request-download-status",
+  /** Watch -> phone: JSON array of { guid, status, progress }. */
+  WATCH_DOWNLOAD_STATUS: "/podcatch/watch-download-status",
 } as const;
 
 /** Keys used inside a DataMap for the SUBSCRIPTIONS data item. */
