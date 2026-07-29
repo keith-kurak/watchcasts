@@ -1,7 +1,9 @@
+import BottomSheetComponent, { BottomSheetView } from '@expo/ui/community/bottom-sheet';
+import { Slider } from '@expo/ui/community/slider';
 import { useAudioPlayerStatus } from 'expo-audio';
 import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
-import { useRef } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { DownloadToggle } from '@/components/download-toggle';
@@ -33,7 +35,7 @@ export function EpisodeDetail({ episodeId, podcastId }: EpisodeDetailProps) {
   const podcast: Podcast | undefined = getSubscriptions().find((s) => s.id === podcastId);
   const episodes = getCachedEpisodes(podcastId) ?? [];
   const episode: Episode | undefined = episodes.find((e) => e.guid === episodeId);
-  const { player, currentEpisode, play, pause, resume } = useAudio();
+  const { player, currentEpisode, play, pause, resume, playbackRate, setPlaybackRate } = useAudio();
   const status = useAudioPlayerStatus(player);
   const theme = useTheme();
   const { data: downloadItem } = useIsInDownloads(episodeId);
@@ -103,6 +105,8 @@ export function EpisodeDetail({ episodeId, podcastId }: EpisodeDetailProps) {
             onSeek={async (seconds) => {
               if (isThisEpisode) await player.seekTo(seconds);
             }}
+            playbackRate={playbackRate}
+            onPlaybackRateChange={setPlaybackRate}
             theme={theme}
             disabled={!canPlay && !isThisEpisode}
           />
@@ -118,6 +122,10 @@ export function EpisodeDetail({ episodeId, podcastId }: EpisodeDetailProps) {
   );
 }
 
+function formatRate(rate: number): string {
+  return rate % 1 === 0 ? `${rate}x` : `${rate.toFixed(1)}x`;
+}
+
 function PlaybackControls({
   isPlaying,
   progress,
@@ -125,6 +133,8 @@ function PlaybackControls({
   duration,
   onPlayPause,
   onSeek,
+  playbackRate,
+  onPlaybackRateChange,
   theme,
   disabled,
 }: {
@@ -134,10 +144,20 @@ function PlaybackControls({
   duration: number;
   onPlayPause: () => void;
   onSeek: (seconds: number) => Promise<void>;
+  playbackRate: number;
+  onPlaybackRateChange: (rate: number) => void;
   theme: ReturnType<typeof useTheme>;
   disabled?: boolean;
 }) {
   const progressBarWidth = useRef<number>(0);
+  const sheetRef = useRef<BottomSheetComponent>(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
+
+  const handleSpeedPress = useCallback(() => {
+    setSheetOpen(true);
+    // expand after mount on next frame
+    requestAnimationFrame(() => sheetRef.current?.expand());
+  }, []);
 
   return (
     <View style={styles.controls}>
@@ -195,6 +215,40 @@ function PlaybackControls({
           </View>
         </View>
       )}
+
+      <Pressable onPress={handleSpeedPress} style={styles.speedButton} hitSlop={8}>
+        <ThemedText style={styles.speedButtonText}>{formatRate(playbackRate)}</ThemedText>
+      </Pressable>
+
+      {sheetOpen && (
+        <BottomSheetComponent
+          ref={sheetRef}
+          index={-1}
+          enablePanDownToClose
+          onClose={() => setSheetOpen(false)}
+        >
+          <BottomSheetView style={styles.sheetContent}>
+            <ThemedText style={styles.sheetTitle}>
+              Playback Speed: {formatRate(playbackRate)}
+            </ThemedText>
+            <Slider
+              minimumValue={0.5}
+              maximumValue={2}
+              step={0.1}
+              value={playbackRate}
+              onValueChange={(value) => {
+                onPlaybackRateChange(Math.round(value * 10) / 10);
+              }}
+            />
+            <View style={styles.sliderLabels}>
+              <ThemedText type="small" themeColor="textSecondary">0.5x</ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">1x</ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">1.5x</ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">2x</ThemedText>
+            </View>
+          </BottomSheetView>
+        </BottomSheetComponent>
+      )}
     </View>
   );
 }
@@ -247,6 +301,29 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  speedButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  speedButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  sheetContent: {
+    padding: Spacing.three,
+    gap: Spacing.two,
+  },
+  sheetTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  sliderLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
   },
   progressContainer: {
     flex: 1,

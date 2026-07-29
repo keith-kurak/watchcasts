@@ -17,6 +17,7 @@ data class WatchEpisode(
     val artworkUrl: String,
     val downloadProgress: Int = 0,
     val localPath: String? = null,
+    val error: Boolean = false,
 )
 
 object SyncedWatchEpisodes {
@@ -30,10 +31,12 @@ object SyncedWatchEpisodes {
         if (json == null) return
         val existing = _episodes.value.associateBy { it.guid }
         val list = mutableListOf<WatchEpisode>()
+        val newGuids = mutableSetOf<String>()
         val array = JSONArray(json)
         for (i in 0 until array.length()) {
             val obj = array.optJSONObject(i) ?: continue
             val guid = obj.optString("guid", "")
+            newGuids.add(guid)
             val prev = existing[guid]
             // Check in-memory state first, then fall back to checking disk
             val localPath = prev?.localPath ?: run {
@@ -55,6 +58,12 @@ object SyncedWatchEpisodes {
                 )
             )
         }
+        // Delete downloaded files for episodes removed from the watch list
+        for ((guid, ep) in existing) {
+            if (guid !in newGuids && ep.localPath != null) {
+                File(ep.localPath).delete()
+            }
+        }
         _episodes.value = list
     }
 
@@ -66,7 +75,13 @@ object SyncedWatchEpisodes {
 
     fun markDownloaded(guid: String, localPath: String) {
         _episodes.value = _episodes.value.map {
-            if (it.guid == guid) it.copy(downloadProgress = 100, localPath = localPath) else it
+            if (it.guid == guid) it.copy(downloadProgress = 100, localPath = localPath, error = false) else it
+        }
+    }
+
+    fun markError(guid: String) {
+        _episodes.value = _episodes.value.map {
+            if (it.guid == guid) it.copy(error = true) else it
         }
     }
 }

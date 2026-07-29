@@ -21,10 +21,12 @@ interface AudioContextValue {
   player: AudioPlayer;
   currentEpisode: Episode | null;
   currentPodcast: Podcast | null;
+  playbackRate: number;
   play: (episode: Episode, podcast: Podcast, localUri?: string) => void;
   pause: () => void;
   resume: () => void;
   seekTo: (seconds: number) => Promise<void>;
+  setPlaybackRate: (rate: number) => void;
 }
 
 const AudioContext = createContext<AudioContextValue | null>(null);
@@ -32,6 +34,7 @@ const AudioContext = createContext<AudioContextValue | null>(null);
 export function AudioProvider({ children }: { children: React.ReactNode }) {
   const playerRef = useRef<AudioPlayer | null>(null);
   const [nowPlaying, setNowPlaying] = useState<NowPlaying | null>(null);
+  const [playbackRate, setPlaybackRateState] = useState(1);
   const playRetryRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   if (!playerRef.current) {
@@ -84,6 +87,11 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
       player,
       currentEpisode: nowPlaying?.episode ?? null,
       currentPodcast: nowPlaying?.podcast ?? null,
+      playbackRate,
+      setPlaybackRate: (rate: number) => {
+        player.setPlaybackRate(rate);
+        setPlaybackRateState(rate);
+      },
       play: async (episode: Episode, podcast: Podcast, localUri?: string) => {
         const uri = localUri ?? episode.audioUrl;
         if (!uri) return;
@@ -138,7 +146,7 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
       },
       seekTo: (seconds: number) => player.seekTo(seconds),
     }),
-    [player, nowPlaying],
+    [player, nowPlaying, playbackRate],
   );
 
   return <AudioContext.Provider value={value}>{children}</AudioContext.Provider>;

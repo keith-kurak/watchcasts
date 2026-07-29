@@ -62,6 +62,7 @@ import dev.podcatch.app.data.EpisodeDownloadWorker
 import dev.podcatch.app.data.WatchEpisode
 import dev.podcatch.app.data.SyncedSubscriptions
 import dev.podcatch.app.data.SyncedWatchEpisodes
+import dev.podcatch.app.data.WatchDownloadStatusReporter
 import java.io.File
 import dev.podcatch.app.presentation.theme.PodcatchTheme
 
@@ -92,6 +93,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
                         DataLayerContract.PATH_WATCH_EPISODES -> {
                             Log.d(TAG, "Read existing watch episodes from Data Layer")
                             SyncedWatchEpisodes.update(json)
+                            WatchDownloadStatusReporter.reportStatus(this@MainActivity)
                             enqueueDownloads()
                         }
                     }
@@ -118,6 +120,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
                 DataLayerContract.PATH_WATCH_EPISODES -> {
                     Log.d(TAG, "Live data change: watch episodes updated")
                     SyncedWatchEpisodes.update(json)
+                    WatchDownloadStatusReporter.reportStatus(this@MainActivity)
                     enqueueDownloads()
                 }
             }
@@ -135,6 +138,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
 
         val request = OneTimeWorkRequestBuilder<EpisodeDownloadWorker>()
             .setConstraints(constraints)
+            .setExpedited(androidx.work.OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             .build()
 
         WorkManager.getInstance(this).enqueueUniqueWork(
@@ -158,6 +162,7 @@ private fun enqueueEpisodeDownload(context: android.content.Context, episode: Wa
         .build()
     val request = OneTimeWorkRequestBuilder<EpisodeDownloadWorker>()
         .setConstraints(constraints)
+        .setExpedited(androidx.work.OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
         .build()
     WorkManager.getInstance(context).enqueueUniqueWork(
         EpisodeDownloadWorker.UNIQUE_WORK_NAME,

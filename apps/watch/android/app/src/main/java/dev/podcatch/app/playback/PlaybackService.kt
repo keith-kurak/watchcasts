@@ -20,7 +20,7 @@ class PlaybackService : MediaSessionService() {
         PlaybackState.init(this)
 
         val player = ExoPlayer.Builder(this)
-            .setSeekForwardIncrementMs(10_000L)
+            .setSeekForwardIncrementMs(30_000L)
             .setSeekBackIncrementMs(10_000L)
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -43,6 +43,17 @@ class PlaybackService : MediaSessionService() {
                         }
                         if (newGuid != null) {
                             PlaybackState.setCurrentEpisode(newGuid)
+                        }
+                    }
+
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        if (playbackState == Player.STATE_ENDED) {
+                            // Save the end position and stay there — don't reset
+                            val guid = PlaybackState.currentGuid
+                            val player = mediaSession?.player
+                            if (guid != null && player != null) {
+                                PlaybackState.savePosition(guid, player.duration)
+                            }
                         }
                     }
                 })

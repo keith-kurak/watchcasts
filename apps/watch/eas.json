@@ -5,15 +5,13 @@
   "build": {
     "preview-watch": {
       "android": {
-        "config": "watch-preview.yml",
-        "buildArtifactPaths": ["apps/watch/android/app/build/outputs/**/*.apk"]
+        "config": "watch-preview.yml"
       },
       "distribution": "internal"
     },
     "production-watch": {
       "android": {
-        "config": "watch-production.yml",
-        "buildArtifactPaths": ["apps/watch/android/app/build/outputs/**/*.aab"]
+        "config": "watch-production.yml"
       }
     }
   }

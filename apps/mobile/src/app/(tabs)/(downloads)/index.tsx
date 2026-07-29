@@ -2,7 +2,6 @@ import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 
-import { PhoneStatusIcon } from '@/components/playback-status-icon';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { NowPlayingBarHeight, Spacing } from '@/constants/theme';
@@ -71,7 +70,6 @@ function DownloadRow({ item }: { item: EnrichedDownloadItem }) {
           </View>
         )}
       </View>
-      <PhoneStatusIcon episodeGuid={item.episodeGuid} downloadStatus={item.status} />
     </Pressable>
   );
 }

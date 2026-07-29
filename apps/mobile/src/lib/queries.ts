@@ -38,6 +38,7 @@ export interface EnrichedDownloadItem {
   podcast: Podcast | undefined;
   status: DownloadStatus;
   localPath?: string;
+  progress?: number;
 }
 
 export function useDownloadsQuery(subscriptions: Podcast[]) {
@@ -128,7 +129,7 @@ export function useWatchListQuery(subscriptions: Podcast[]) {
           podcastId: wi.podcastId,
           episode,
           podcast,
-          status: 'complete', // watch list items don't have download status
+          status: 'pending',
         });
       }
       return items;

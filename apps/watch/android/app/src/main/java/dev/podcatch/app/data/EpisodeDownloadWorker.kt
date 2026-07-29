@@ -1,8 +1,12 @@
 package dev.podcatch.app.data
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
 import android.util.Log
+import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
+import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -28,23 +32,27 @@ class EpisodeDownloadWorker(
 
         while (true) {
             val episode = SyncedWatchEpisodes.episodes.value
-                .firstOrNull { it.localPath == null && it.audioUrl.isNotBlank() }
+                .firstOrNull { it.localPath == null && !it.error && it.audioUrl.isNotBlank() }
                 ?: break // All done
 
             Log.d(TAG, "Downloading episode ${episode.guid}")
+            SyncedWatchEpisodes.updateProgress(episode.guid, 1)
+            WatchDownloadStatusReporter.reportStatus(applicationContext)
             try {
                 val outFile = File(dir, "${episode.guid}.mp3")
+                val tmpFile = File(dir, "${episode.guid}.mp3.tmp")
 
                 val connection = URL(episode.audioUrl).openConnection()
                 val totalBytes = connection.contentLength
                 val input = connection.getInputStream()
-                val output = outFile.outputStream()
+                val output = tmpFile.outputStream()
 
                 input.use { src ->
                     output.use { dst ->
                         val buffer = ByteArray(8192)
                         var bytesRead: Long = 0
                         var lastReportedProgress = -1
+                        var lastReportedToPhone = -1
 
                         while (true) {
                             val read = src.read(buffer)
@@ -57,27 +65,57 @@ class EpisodeDownloadWorker(
                                 if (progress != lastReportedProgress) {
                                     lastReportedProgress = progress
                                     SyncedWatchEpisodes.updateProgress(episode.guid, progress)
+                                    // Throttle phone reports to every 5%
+                                    if (progress / 5 != lastReportedToPhone / 5) {
+                                        lastReportedToPhone = progress
+                                        WatchDownloadStatusReporter.reportStatus(applicationContext)
+                                    }
                                 }
                             }
                         }
                     }
                 }
 
+                // Atomic rename — only a fully downloaded file becomes .mp3
+                tmpFile.renameTo(outFile)
                 SyncedWatchEpisodes.markDownloaded(episode.guid, outFile.absolutePath)
+                WatchDownloadStatusReporter.reportStatus(applicationContext)
                 Log.d(TAG, "Downloaded episode ${episode.guid} to ${outFile.absolutePath}")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to download episode ${episode.guid}", e)
+                // Clean up partial download
+                File(dir, "${episode.guid}.mp3.tmp").delete()
+                SyncedWatchEpisodes.markError(episode.guid)
+                WatchDownloadStatusReporter.reportStatus(applicationContext)
                 // Retry the whole worker (will pick up where it left off)
                 return@withContext Result.retry()
             }
         }
 
         Log.d(TAG, "All episodes downloaded")
+        WatchDownloadStatusReporter.reportStatus(applicationContext)
         Result.success()
+    }
+
+    override suspend fun getForegroundInfo(): ForegroundInfo {
+        val channelId = "episode_downloads"
+        val manager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (manager.getNotificationChannel(channelId) == null) {
+            manager.createNotificationChannel(
+                NotificationChannel(channelId, "Episode Downloads", NotificationManager.IMPORTANCE_LOW)
+            )
+        }
+        val notification = NotificationCompat.Builder(applicationContext, channelId)
+            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setContentTitle("Downloading episodes")
+            .setSilent(true)
+            .build()
+        return ForegroundInfo(NOTIFICATION_ID, notification)
     }
 
     companion object {
         private const val TAG = "EpisodeDownload"
+        private const val NOTIFICATION_ID = 1001
         const val UNIQUE_WORK_NAME = "episode-downloads"
     }
 }

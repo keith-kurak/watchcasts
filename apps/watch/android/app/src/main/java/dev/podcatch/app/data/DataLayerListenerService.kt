@@ -31,6 +31,7 @@ class DataLayerListenerService : WearableListenerService() {
                     Log.d(TAG, "Watch episodes synced (updatedAt=$updatedAt)")
                     SyncedWatchEpisodes.episodesDir = File(applicationContext.filesDir, "episodes")
                     SyncedWatchEpisodes.update(json)
+                    WatchDownloadStatusReporter.reportStatus(applicationContext)
                     enqueueDownloads()
                 }
             }
@@ -42,7 +43,13 @@ class DataLayerListenerService : WearableListenerService() {
             DataLayerContract.PATH_REQUEST_SYNC -> {
                 Log.d(TAG, "Received force-download request from phone")
                 SyncedWatchEpisodes.episodesDir = File(applicationContext.filesDir, "episodes")
+                WatchDownloadStatusReporter.reportStatus(applicationContext)
                 enqueueDownloads()
+            }
+            DataLayerContract.PATH_REQUEST_DOWNLOAD_STATUS -> {
+                Log.d(TAG, "Received download status request from phone")
+                SyncedWatchEpisodes.episodesDir = File(applicationContext.filesDir, "episodes")
+                WatchDownloadStatusReporter.reportStatus(applicationContext)
             }
         }
     }
@@ -58,6 +65,7 @@ class DataLayerListenerService : WearableListenerService() {
 
         val request = OneTimeWorkRequestBuilder<EpisodeDownloadWorker>()
             .setConstraints(constraints)
+            .setExpedited(androidx.work.OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             .build()
 
         WorkManager.getInstance(applicationContext).enqueueUniqueWork(

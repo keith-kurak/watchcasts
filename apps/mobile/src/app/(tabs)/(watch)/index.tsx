@@ -1,23 +1,98 @@
 import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
 import { Stack, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
 import { FlatList, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { WatchStatusIcon } from '@/components/playback-status-icon';
 import { NowPlayingBarHeight, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { formatDate, formatDuration } from '@/lib/format';
 import { useWatchListQuery, useWatchListMutations, type EnrichedDownloadItem } from '@/lib/queries';
 import { getSubscriptions } from '@/lib/storage';
-import { getConnectedNodes, sendForceDownload } from '@/hooks/useWearDataLayer';
+import { getConnectedNodes, sendForceDownload, requestWatchDownloadStatus, useWatchDownloadStatusListener } from '@/hooks/useWearDataLayer';
+import type { WatchEpisodeStatus } from '../../modules/wear-data-layer/src';
+
+const WatchRow = memo(function WatchRow({
+  item,
+  watchStatus,
+}: {
+  item: EnrichedDownloadItem;
+  watchStatus: WatchEpisodeStatus | undefined;
+}) {
+  const router = useRouter();
+  const theme = useTheme();
+  const status = watchStatus?.status ?? 'pending';
+  const progress = watchStatus?.progress ?? 0;
+  const isDownloading = status === 'downloading';
+
+  return (
+    <Pressable
+      style={styles.episodeRow}
+      onPress={() =>
+        router.push({
+          pathname: '/(tabs)/(watch)/episode/[episodeId]',
+          params: { episodeId: item.episodeGuid, podcastId: item.podcastId },
+        })
+      }
+    >
+      <Image
+        source={{ uri: item.episode.imageUrl ?? item.podcast?.artworkUrl }}
+        style={styles.thumbnail}
+        contentFit="cover"
+      />
+      <View style={styles.episodeContent}>
+        <ThemedText style={styles.episodeTitle} numberOfLines={2}>
+          {item.episode.title}
+        </ThemedText>
+        <View style={styles.episodeMeta}>
+          {isDownloading && (
+            <ThemedText type="small" themeColor="textSecondary">
+              Downloading… {progress > 0 ? `${progress}%` : ''}
+            </ThemedText>
+          )}
+          {status === 'pending' && (
+            <ThemedText type="small" themeColor="textSecondary">
+              Waiting…
+            </ThemedText>
+          )}
+          {status === 'error' && (
+            <ThemedText type="small" style={{ color: '#FF3B30' }}>
+              Error
+            </ThemedText>
+          )}
+          {status === 'complete' && item.episode.pubDate && (
+            <ThemedText type="small" themeColor="textSecondary">
+              {formatDate(item.episode.pubDate)}
+            </ThemedText>
+          )}
+          {item.episode.duration && (
+            <ThemedText type="small" themeColor="textSecondary">
+              {formatDuration(item.episode.duration)}
+            </ThemedText>
+          )}
+        </View>
+        {isDownloading && (
+          <View style={[styles.progressTrack, { backgroundColor: theme.backgroundElement }]}>
+            <View
+              style={[
+                styles.progressFill,
+                { width: `${progress}%` },
+              ]}
+            />
+          </View>
+        )}
+      </View>
+    </Pressable>
+  );
+});
 
 export default function WatchScreen() {
   const router = useRouter();
   const theme = useTheme();
   const subscriptions = getSubscriptions();
+  const watchStatuses = useWatchDownloadStatusListener();
   const { data: watchList = [], isLoading, refetch, isRefetching } = useWatchListQuery(subscriptions);
   const { triggerSync } = useWatchListMutations();
   const [connected, setConnected] = useState<boolean | null>(null);
@@ -38,45 +113,8 @@ export default function WatchScreen() {
     checkConnection();
     triggerSync();
     sendForceDownload().catch(() => {});
+    requestWatchDownloadStatus().catch(() => {});
   }, [checkConnection, triggerSync]);
-
-  function renderItem({ item }: { item: EnrichedDownloadItem }) {
-    return (
-      <Pressable
-        style={styles.episodeRow}
-        onPress={() =>
-          router.push({
-            pathname: '/(tabs)/(watch)/episode/[episodeId]',
-            params: { episodeId: item.episodeGuid, podcastId: item.podcastId },
-          })
-        }
-      >
-        <Image
-          source={{ uri: item.episode.imageUrl ?? item.podcast?.artworkUrl }}
-          style={styles.thumbnail}
-          contentFit="cover"
-        />
-        <View style={styles.episodeContent}>
-          <ThemedText style={styles.episodeTitle} numberOfLines={2}>
-            {item.episode.title}
-          </ThemedText>
-          <View style={styles.episodeMeta}>
-            {item.episode.pubDate && (
-              <ThemedText type="small" themeColor="textSecondary">
-                {formatDate(item.episode.pubDate)}
-              </ThemedText>
-            )}
-            {item.episode.duration && (
-              <ThemedText type="small" themeColor="textSecondary">
-                {formatDuration(item.episode.duration)}
-              </ThemedText>
-            )}
-          </View>
-        </View>
-        <WatchStatusIcon episodeGuid={item.episodeGuid} />
-      </Pressable>
-    );
-  }
 
   return (
     <ThemedView style={styles.container}>
@@ -103,11 +141,14 @@ export default function WatchScreen() {
       )}
       <FlatList
         data={watchList}
+        extraData={watchStatuses}
         keyExtractor={(item) => item.episodeGuid}
         refreshing={isRefetching}
         onRefresh={() => refetch()}
         contentContainerStyle={styles.list}
-        renderItem={renderItem}
+        renderItem={({ item }) => (
+          <WatchRow item={item} watchStatus={watchStatuses.get(item.episodeGuid)} />
+        )}
         ListEmptyComponent={
           isLoading ? null : (
             <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
@@ -158,6 +199,16 @@ const styles = StyleSheet.create({
   episodeMeta: {
     flexDirection: 'row',
     gap: Spacing.three,
+  },
+  progressTrack: {
+    height: 3,
+    borderRadius: 1.5,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#007AFF',
+    borderRadius: 1.5,
   },
   emptyText: {
     textAlign: 'center',
