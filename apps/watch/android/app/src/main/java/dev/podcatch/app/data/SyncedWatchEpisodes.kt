@@ -1,5 +1,6 @@
 package dev.podcatch.app.data
 
+import dev.podcatch.app.playback.PlaybackState
 import java.io.File
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -17,6 +18,8 @@ data class WatchEpisode(
     val artworkUrl: String,
     val downloadProgress: Int = 0,
     val localPath: String? = null,
+    /** Cached artwork file on disk, so the list renders offline. */
+    val artworkPath: String? = null,
     val error: Boolean = false,
 )
 
@@ -26,6 +29,17 @@ object SyncedWatchEpisodes {
 
     /** Directory where episode audio files are downloaded. Must be set before [update]. */
     var episodesDir: File? = null
+
+    /** Directory where podcast artwork is cached. Defaults to [episodesDir]/artwork. */
+    val artworkDir: File?
+        get() = episodesDir?.let { File(it, "artwork") }
+
+    /** Stable on-disk name for an artwork URL, shared by episodes of the same podcast. */
+    fun artworkFile(artworkUrl: String): File? {
+        if (artworkUrl.isBlank()) return null
+        val name = Integer.toHexString(artworkUrl.hashCode()) + ".img"
+        return artworkDir?.let { File(it, name) }
+    }
 
     fun update(json: String?) {
         if (json == null) return
@@ -43,6 +57,11 @@ object SyncedWatchEpisodes {
                 val file = episodesDir?.let { File(it, "$guid.mp3") }
                 if (file?.exists() == true) file.absolutePath else null
             }
+            val artworkUrl = obj.optString("artworkUrl", "")
+            val artworkPath = prev?.artworkPath ?: run {
+                val file = artworkFile(artworkUrl)
+                if (file?.exists() == true) file.absolutePath else null
+            }
             list.add(
                 WatchEpisode(
                     guid = guid,
@@ -52,17 +71,20 @@ object SyncedWatchEpisodes {
                     audioUrl = obj.optString("audioUrl", ""),
                     duration = obj.optString("duration", ""),
                     pubDate = obj.optString("pubDate", ""),
-                    artworkUrl = obj.optString("artworkUrl", ""),
+                    artworkUrl = artworkUrl,
                     downloadProgress = if (localPath != null) 100 else (prev?.downloadProgress ?: 0),
                     localPath = localPath,
+                    artworkPath = artworkPath,
                 )
             )
         }
         // Delete downloaded files for episodes removed from the watch list
+        val keptArtwork = list.mapNotNull { it.artworkPath }.toSet()
         for ((guid, ep) in existing) {
-            if (guid !in newGuids && ep.localPath != null) {
-                File(ep.localPath).delete()
-            }
+            if (guid in newGuids) continue
+            ep.localPath?.let { File(it).delete() }
+            ep.artworkPath?.let { if (it !in keptArtwork) File(it).delete() }
+            PlaybackState.forget(guid)
         }
         _episodes.value = list
     }
@@ -76,6 +98,13 @@ object SyncedWatchEpisodes {
     fun markDownloaded(guid: String, localPath: String) {
         _episodes.value = _episodes.value.map {
             if (it.guid == guid) it.copy(downloadProgress = 100, localPath = localPath, error = false) else it
+        }
+    }
+
+    /** Point every episode using [artworkUrl] at the cached file. */
+    fun markArtworkDownloaded(artworkUrl: String, path: String) {
+        _episodes.value = _episodes.value.map {
+            if (it.artworkUrl == artworkUrl) it.copy(artworkPath = path) else it
         }
     }
 

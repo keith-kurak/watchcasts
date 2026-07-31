@@ -45,6 +45,7 @@ import dev.podcatch.app.data.SyncedWatchEpisodes
 import dev.podcatch.app.data.WatchEpisode
 import dev.podcatch.app.playback.PlaybackService
 import dev.podcatch.app.playback.PlaybackState
+import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -161,38 +162,72 @@ class EpisodePlayerViewModel(
                 .await()
             controller = ctrl
 
-            // If the service is already playing this episode, just reconnect
-            // the UI without resetting playback.
-            if (PlaybackState.currentGuid == episode.guid) {
+            // The player itself is the source of truth for what is loaded — after
+            // a process restart the in-memory currentGuid is gone, but the service
+            // may still hold this episode.
+            val loadedGuid = ctrl.currentMediaItem?.mediaId
+            if (loadedGuid == episode.guid) {
                 repository.connect(ctrl) {}
                 ctrl.setPlaybackSpeed(currentSpeed)
+                PlaybackState.setCurrentEpisode(episode.guid)
+                startPositionAutosave()
                 return@launch
             }
 
-            // Save position of the currently playing episode before switching
-            val prevGuid = PlaybackState.currentGuid
-            if (prevGuid != null && ctrl.currentPosition > 0L) {
-                PlaybackState.savePosition(prevGuid, ctrl.currentPosition)
+            // Save position of the previously loaded episode before switching
+            if (loadedGuid != null && ctrl.currentPosition > 0L) {
+                PlaybackState.savePosition(
+                    loadedGuid,
+                    ctrl.currentPosition,
+                    ctrl.duration.coerceAtLeast(0L),
+                )
             }
 
             repository.connect(ctrl) {}
-            repository.setMedia(
-                Media(
-                    id = episode.guid,
-                    uri = episode.localPath ?: "",
-                    title = episode.title,
-                    artist = episode.podcastTitle,
+
+            // Restore the saved position as the start position — seeking after
+            // setMedia is not reliable while the player is still idle.
+            // A finished episode starts over.
+            val saved = PlaybackState.getProgress(episode.guid)
+            val startPosition = if (saved.completed) 0L else saved.positionMs
+
+            repository.setMediaList(
+                listOf(
+                    Media(
+                        id = episode.guid,
+                        uri = episode.localPath ?: "",
+                        title = episode.title,
+                        artist = episode.podcastTitle,
+                    ),
                 ),
+                index = 0,
+                position = startPosition.milliseconds,
             )
 
             PlaybackState.setCurrentEpisode(episode.guid)
 
             ctrl.setPlaybackSpeed(currentSpeed)
 
-            // Restore saved position for this episode
-            val savedPosition = PlaybackState.getSavedPosition(episode.guid)
-            if (savedPosition > 0L) {
-                ctrl.seekTo(savedPosition)
+            startPositionAutosave()
+        }
+    }
+
+    /**
+     * Persist the position every few seconds. onCleared/onDestroy do not run when
+     * the app is force-closed, so periodic saves are what survive a kill.
+     */
+    private fun startPositionAutosave() {
+        viewModelScope.launch {
+            while (true) {
+                delay(POSITION_SAVE_INTERVAL_MS)
+                val ctrl = controller ?: continue
+                if (!ctrl.isConnected) continue
+                if (ctrl.currentMediaItem?.mediaId != episode.guid) continue
+                PlaybackState.savePosition(
+                    episode.guid,
+                    ctrl.currentPosition,
+                    ctrl.duration.coerceAtLeast(0L),
+                )
             }
         }
     }
@@ -206,11 +241,19 @@ class EpisodePlayerViewModel(
     override fun onCleared() {
         // Save position of current episode
         controller?.let { ctrl ->
-            if (PlaybackState.currentGuid == episode.guid && ctrl.isConnected) {
-                PlaybackState.savePosition(episode.guid, ctrl.currentPosition)
+            if (ctrl.isConnected && ctrl.currentMediaItem?.mediaId == episode.guid) {
+                PlaybackState.savePosition(
+                    episode.guid,
+                    ctrl.currentPosition,
+                    ctrl.duration.coerceAtLeast(0L),
+                )
             }
         }
         super.onCleared()
+    }
+
+    companion object {
+        private const val POSITION_SAVE_INTERVAL_MS = 5_000L
     }
 }
 

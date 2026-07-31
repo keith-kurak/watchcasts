@@ -29,6 +29,10 @@ class EpisodeDownloadWorker(
 
         // Initialize episodesDir so disk checks work
         SyncedWatchEpisodes.episodesDir = dir
+        SyncedWatchEpisodes.artworkDir?.mkdirs()
+
+        // Artwork first — it is small, and the list needs it to render offline.
+        downloadArtwork()
 
         while (true) {
             val episode = SyncedWatchEpisodes.episodes.value
@@ -95,6 +99,37 @@ class EpisodeDownloadWorker(
         Log.d(TAG, "All episodes downloaded")
         WatchDownloadStatusReporter.reportStatus(applicationContext)
         Result.success()
+    }
+
+    /**
+     * Cache artwork for every episode that lacks it. Failures are non-fatal —
+     * a missing image must not block or retry the audio downloads.
+     */
+    private fun downloadArtwork() {
+        val urls = SyncedWatchEpisodes.episodes.value
+            .filter { it.artworkPath == null && it.artworkUrl.isNotBlank() }
+            .map { it.artworkUrl }
+            .distinct()
+
+        for (url in urls) {
+            val outFile = SyncedWatchEpisodes.artworkFile(url) ?: continue
+            if (outFile.exists()) {
+                SyncedWatchEpisodes.markArtworkDownloaded(url, outFile.absolutePath)
+                continue
+            }
+            try {
+                val tmpFile = File(outFile.absolutePath + ".tmp")
+                URL(url).openStream().use { src ->
+                    tmpFile.outputStream().use { dst -> src.copyTo(dst) }
+                }
+                tmpFile.renameTo(outFile)
+                SyncedWatchEpisodes.markArtworkDownloaded(url, outFile.absolutePath)
+                Log.d(TAG, "Cached artwork $url")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to cache artwork $url", e)
+                File(outFile.absolutePath + ".tmp").delete()
+            }
+        }
     }
 
     override suspend fun getForegroundInfo(): ForegroundInfo {

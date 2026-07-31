@@ -52,7 +52,7 @@ class PlaybackService : MediaSessionService() {
                             val guid = PlaybackState.currentGuid
                             val player = mediaSession?.player
                             if (guid != null && player != null) {
-                                PlaybackState.savePosition(guid, player.duration)
+                                PlaybackState.markCompleted(guid, player.duration.coerceAtLeast(0L))
                             }
                         }
                     }
@@ -72,7 +72,11 @@ class PlaybackService : MediaSessionService() {
         if (player != null) {
             val guid = PlaybackState.currentGuid
             if (guid != null) {
-                PlaybackState.savePosition(guid, player.currentPosition)
+                PlaybackState.savePosition(
+                    guid,
+                    player.currentPosition,
+                    player.duration.coerceAtLeast(0L),
+                )
             }
         }
         if (player == null || !player.playWhenReady || player.mediaItemCount == 0) {
@@ -85,7 +89,11 @@ class PlaybackService : MediaSessionService() {
         mediaSession?.player?.let { player ->
             val guid = PlaybackState.currentGuid
             if (guid != null) {
-                PlaybackState.savePosition(guid, player.currentPosition)
+                PlaybackState.savePosition(
+                    guid,
+                    player.currentPosition,
+                    player.duration.coerceAtLeast(0L),
+                )
             }
             player.release()
         }
