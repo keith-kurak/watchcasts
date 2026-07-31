@@ -23,6 +23,8 @@ import androidx.compose.material.icons.rounded.Download
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -195,10 +197,24 @@ fun PodcatchApp() {
                     EpisodePlayerScreen(
                         guid = Uri.decode(guid),
                         onVolumeClick = { navController.navigate("volume") },
+                        onSpeedClick = { navController.navigate("speed") },
                     )
                 }
                 composable("volume") {
                     VolumeScreen()
+                }
+                composable("speed") {
+                    val playerEntry = remember(navController) {
+                        navController.getBackStackEntry("player/{guid}")
+                    }
+                    val playerViewModel: EpisodePlayerViewModel = viewModel(
+                        viewModelStoreOwner = playerEntry,
+                    )
+                    SpeedScreen(
+                        currentSpeed = playerViewModel.currentSpeed,
+                        onSpeedSelected = { speed -> playerViewModel.setSpeed(speed) },
+                        onBack = { navController.popBackStack() },
+                    )
                 }
             }
         }

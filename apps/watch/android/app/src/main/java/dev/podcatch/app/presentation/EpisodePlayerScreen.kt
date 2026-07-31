@@ -4,16 +4,23 @@ import android.app.Application
 import android.content.ComponentName
 import android.os.Vibrator
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.wear.compose.material.Button
+import androidx.wear.compose.material.ButtonDefaults
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -43,7 +50,7 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalHorologistApi::class)
 @Composable
-fun EpisodePlayerScreen(guid: String, onVolumeClick: () -> Unit) {
+fun EpisodePlayerScreen(guid: String, onVolumeClick: () -> Unit, onSpeedClick: () -> Unit) {
     val episodes by SyncedWatchEpisodes.episodes.collectAsState()
     val episode = episodes.find { it.guid == guid }
     if (episode == null || episode.localPath == null) return
@@ -104,10 +111,25 @@ fun EpisodePlayerScreen(guid: String, onVolumeClick: () -> Unit) {
             )
         },
         buttons = { _ ->
-            SetVolumeButton(
-                onVolumeClick = onVolumeClick,
-                volumeUiState = volumeUiState,
-            )
+            Row {
+                SetVolumeButton(
+                    onVolumeClick = onVolumeClick,
+                    volumeUiState = volumeUiState,
+                )
+                Button(
+                    onClick = onSpeedClick,
+                    modifier = Modifier.size(ButtonDefaults.SmallButtonSize),
+                    colors = ButtonDefaults.secondaryButtonColors(),
+                ) {
+                    val speed = playerViewModel.currentSpeed
+                    val label = if (speed == speed.toInt().toFloat()) {
+                        "${speed.toInt()}x"
+                    } else {
+                        "${speed}x"
+                    }
+                    Text(label, style = MaterialTheme.typography.caption2)
+                }
+            }
         },
     )
 }
@@ -122,8 +144,12 @@ class EpisodePlayerViewModel(
     var controller: MediaController? = null
         private set
 
+    var currentSpeed by mutableFloatStateOf(1.0f)
+        private set
+
     init {
         PlaybackState.init(application)
+        currentSpeed = PlaybackState.getSavedSpeed()
 
         viewModelScope.launch {
             val sessionToken = SessionToken(
@@ -139,6 +165,7 @@ class EpisodePlayerViewModel(
             // the UI without resetting playback.
             if (PlaybackState.currentGuid == episode.guid) {
                 repository.connect(ctrl) {}
+                ctrl.setPlaybackSpeed(currentSpeed)
                 return@launch
             }
 
@@ -160,12 +187,20 @@ class EpisodePlayerViewModel(
 
             PlaybackState.setCurrentEpisode(episode.guid)
 
+            ctrl.setPlaybackSpeed(currentSpeed)
+
             // Restore saved position for this episode
             val savedPosition = PlaybackState.getSavedPosition(episode.guid)
             if (savedPosition > 0L) {
                 ctrl.seekTo(savedPosition)
             }
         }
+    }
+
+    fun setSpeed(speed: Float) {
+        currentSpeed = speed
+        controller?.setPlaybackSpeed(speed)
+        PlaybackState.saveSpeed(speed)
     }
 
     override fun onCleared() {

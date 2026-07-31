@@ -33,4 +33,12 @@ object PlaybackState {
     fun getSavedPosition(guid: String): Long {
         return prefs?.getLong("position:$guid", 0L) ?: 0L
     }
+
+    fun saveSpeed(speed: Float) {
+        prefs?.edit()?.putFloat("playbackSpeed", speed)?.apply()
+    }
+
+    fun getSavedSpeed(): Float {
+        return prefs?.getFloat("playbackSpeed", 1.0f) ?: 1.0f
+    }
 }
