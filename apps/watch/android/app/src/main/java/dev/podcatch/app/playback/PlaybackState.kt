@@ -31,10 +31,6 @@ object PlaybackState {
     /** Below this position, an episode still counts as unplayed. */
     const val STARTED_THRESHOLD_MS = 5_000L
 
-    @Volatile
-    var currentGuid: String? = null
-        private set
-
     private var prefs: SharedPreferences? = null
 
     private val _progress = MutableStateFlow<Map<String, EpisodeProgress>>(emptyMap())
@@ -42,11 +38,22 @@ object PlaybackState {
     /** Listen progress by episode guid. Emits whenever a position is saved. */
     val progress: StateFlow<Map<String, EpisodeProgress>> = _progress.asStateFlow()
 
+    private val _playingGuid = MutableStateFlow<String?>(null)
+
+    /** Guid of the episode the player is playing right now, or null when paused. */
+    val playingGuid: StateFlow<String?> = _playingGuid.asStateFlow()
+
+    private val _currentGuid = MutableStateFlow<String?>(null)
+
+    /** Guid of the episode loaded in the player, whether playing or paused. */
+    val currentGuid: String?
+        get() = _currentGuid.value
+
     fun init(context: Context) {
         if (prefs != null) return
         val p = context.applicationContext.getSharedPreferences("playback", Context.MODE_PRIVATE)
         prefs = p
-        currentGuid = p.getString("currentGuid", null)
+        _currentGuid.value = p.getString("currentGuid", null)
         _progress.value = readAllProgress(p)
     }
 
@@ -70,8 +77,14 @@ object PlaybackState {
     }
 
     fun setCurrentEpisode(guid: String) {
-        currentGuid = guid
+        _currentGuid.value = guid
+        if (_playingGuid.value != null) _playingGuid.value = guid
         prefs?.edit()?.putString("currentGuid", guid)?.apply()
+    }
+
+    /** Called by the playback service whenever the player starts or stops. */
+    fun setPlaying(isPlaying: Boolean) {
+        _playingGuid.value = if (isPlaying) _currentGuid.value else null
     }
 
     fun savePosition(guid: String, positionMs: Long, durationMs: Long = 0L) {

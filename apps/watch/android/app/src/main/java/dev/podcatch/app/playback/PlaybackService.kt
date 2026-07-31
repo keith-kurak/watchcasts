@@ -46,6 +46,10 @@ class PlaybackService : MediaSessionService() {
                         }
                     }
 
+                    override fun onIsPlayingChanged(isPlaying: Boolean) {
+                        PlaybackState.setPlaying(isPlaying)
+                    }
+
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         if (playbackState == Player.STATE_ENDED) {
                             // Save the end position and stay there — don't reset

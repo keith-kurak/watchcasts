@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -235,7 +236,25 @@ fun PodcatchApp() {
 
 /** Yellow dot = new, ring = part-listened, grey check = finished. */
 @Composable
-private fun EpisodeStatusIndicator(progress: EpisodeProgress?) {
+private fun EpisodeStatusIndicator(progress: EpisodeProgress?, isPlaying: Boolean) {
+    if (isPlaying) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(18.dp)) {
+            CircularProgressIndicator(
+                progress = (progress?.fraction ?: 0f).coerceAtLeast(0.03f),
+                indicatorColor = MaterialTheme.colors.primary,
+                trackColor = Color.DarkGray,
+                strokeWidth = 2.dp,
+                modifier = Modifier.fillMaxSize(),
+            )
+            Icon(
+                imageVector = Icons.Rounded.PlayArrow,
+                contentDescription = "Playing",
+                tint = MaterialTheme.colors.primary,
+                modifier = Modifier.size(11.dp),
+            )
+        }
+        return
+    }
     when (statusOf(progress)) {
         EpisodeStatus.NEW -> Box(
             modifier = Modifier
@@ -263,6 +282,7 @@ private fun EpisodeStatusIndicator(progress: EpisodeProgress?) {
 fun EpisodeListScreen(onEpisodeClick: (WatchEpisode) -> Unit) {
     val episodes by SyncedWatchEpisodes.episodes.collectAsState()
     val progressByGuid by PlaybackState.progress.collectAsState()
+    val playingGuid by PlaybackState.playingGuid.collectAsState()
     ScalingLazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(top = 32.dp, start = 8.dp, end = 8.dp),
@@ -325,7 +345,10 @@ fun EpisodeListScreen(onEpisodeClick: (WatchEpisode) -> Unit) {
                         }
                         Spacer(modifier = Modifier.width(6.dp))
                         if (isDownloaded) {
-                            EpisodeStatusIndicator(progressByGuid[episode.guid])
+                            EpisodeStatusIndicator(
+                                progress = progressByGuid[episode.guid],
+                                isPlaying = episode.guid == playingGuid,
+                            )
                         } else if (episode.downloadProgress > 0) {
                             Text(
                                 text = "${episode.downloadProgress}%",
