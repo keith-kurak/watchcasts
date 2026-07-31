@@ -10,12 +10,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.items
+import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.material.Chip
 import androidx.wear.compose.material.ChipDefaults
 import androidx.wear.compose.material.Icon
 import androidx.wear.compose.material.Text
 
-private val SPEED_OPTIONS = listOf(0.5f, 0.7f, 0.8f, 0.9f, 1.0f, 1.2f, 1.5f, 1.7f, 2.0f)
+/** 0.5x to 2.0x in 0.1 steps. Generated so the values match saved speeds exactly. */
+private val SPEED_OPTIONS = (5..20).map { it / 10f }
 
 @Composable
 fun SpeedScreen(
@@ -23,16 +25,19 @@ fun SpeedScreen(
     onSpeedSelected: (Float) -> Unit,
     onBack: () -> Unit,
 ) {
+    // Open centred on the speed in use, so it needs no scrolling to confirm.
+    val selectedIndex = SPEED_OPTIONS.indexOf(currentSpeed)
+        .takeIf { it >= 0 }
+        ?: SPEED_OPTIONS.indexOf(1.0f)
+    val listState = rememberScalingLazyListState(initialCenterItemIndex = selectedIndex)
+
     ScalingLazyColumn(
+        state = listState,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(top = 32.dp, start = 8.dp, end = 8.dp),
     ) {
         items(SPEED_OPTIONS) { speed ->
-            val label = if (speed == speed.toInt().toFloat()) {
-                "${speed.toInt()}.0x"
-            } else {
-                "${speed}x"
-            }
+            val label = "%.1fx".format(speed)
             Chip(
                 onClick = {
                     onSpeedSelected(speed)
