@@ -5,7 +5,6 @@ import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.MarqueeAnimationMode
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.Box
@@ -332,9 +331,10 @@ fun EpisodeListScreen(onEpisodeClick: (WatchEpisode) -> Unit) {
                                 style = MaterialTheme.typography.body2,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.basicMarquee(
-                                    animationMode = MarqueeAnimationMode.WhileFocused,
-                                ),
+                                // Holds for 1.2s, scrolls, repeats 3 times, then rests
+                                // on the start of the title. Defaults come from the
+                                // platform TextView marquee.
+                                modifier = Modifier.basicMarquee(),
                             )
                             Text(
                                 text = episode.podcastTitle,

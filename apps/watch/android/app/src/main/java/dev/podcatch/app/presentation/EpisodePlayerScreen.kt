@@ -37,9 +37,10 @@ import com.google.android.horologist.audio.ui.components.actions.SetVolumeButton
 import com.google.android.horologist.media.data.repository.PlayerRepositoryImpl
 import com.google.android.horologist.media.model.Media
 import com.google.android.horologist.media.ui.components.PodcastControlButtons
-import com.google.android.horologist.media.ui.screens.player.DefaultMediaInfoDisplay
+import com.google.android.horologist.media.ui.components.animated.AnimatedMediaInfoDisplay
 import com.google.android.horologist.media.ui.screens.player.PlayerScreen
 import com.google.android.horologist.media.ui.state.PlayerUiState
+import com.google.android.horologist.media.ui.state.model.MediaUiModel
 import com.google.android.horologist.media.ui.state.PlayerViewModel
 import dev.podcatch.app.data.SyncedWatchEpisodes
 import dev.podcatch.app.data.WatchEpisode
@@ -265,7 +266,11 @@ private fun MediaInfoWithElapsed(
     durationMs: Long,
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        DefaultMediaInfoDisplay(playerUiState)
+        // Scrolls a long episode title instead of truncating it, with edge fades.
+        AnimatedMediaInfoDisplay(
+            media = playerUiState.media,
+            loading = !playerUiState.connected || playerUiState.media is MediaUiModel.Loading,
+        )
         if (durationMs > 0L) {
             Text(
                 text = "${formatTime(elapsedMs)} / ${formatTime(durationMs)}",
