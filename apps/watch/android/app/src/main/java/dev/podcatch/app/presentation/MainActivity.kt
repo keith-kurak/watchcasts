@@ -5,8 +5,9 @@ import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.MarqueeAnimationMode
+import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -16,13 +17,17 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -36,6 +41,7 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.items
 import androidx.wear.compose.material.Card
+import androidx.wear.compose.material.CircularProgressIndicator
 import androidx.wear.compose.material.Icon
 import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.Scaffold
@@ -46,6 +52,8 @@ import androidx.wear.compose.navigation.composable
 import androidx.wear.compose.navigation.rememberSwipeDismissableNavController
 import com.google.android.horologist.annotations.ExperimentalHorologistApi
 import com.google.android.horologist.audio.ui.VolumeScreen
+import com.google.android.horologist.compose.ambient.AmbientAware
+import com.google.android.horologist.compose.ambient.AmbientState
 import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
@@ -63,6 +71,10 @@ import dev.podcatch.app.data.WatchEpisode
 import dev.podcatch.app.data.SyncedSubscriptions
 import dev.podcatch.app.data.SyncedWatchEpisodes
 import dev.podcatch.app.data.WatchDownloadStatusReporter
+import dev.podcatch.app.playback.EpisodeProgress
+import dev.podcatch.app.playback.EpisodeStatus
+import dev.podcatch.app.playback.PlaybackState
+import dev.podcatch.app.playback.statusOf
 import java.io.File
 import dev.podcatch.app.presentation.theme.PodcatchTheme
 
@@ -72,6 +84,8 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
         installSplashScreen()
         super.onCreate(savedInstanceState)
         SyncedWatchEpisodes.episodesDir = File(filesDir, "episodes")
+        SyncedWatchEpisodes.artworkDir?.mkdirs()
+        PlaybackState.init(this)
         setContent { PodcatchApp() }
     }
 
@@ -128,9 +142,11 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
     }
 
     private fun enqueueDownloads() {
-        val hasUndownloaded = SyncedWatchEpisodes.episodes.value
-            .any { it.localPath == null && it.audioUrl.isNotBlank() }
-        if (!hasUndownloaded) return
+        val hasWork = SyncedWatchEpisodes.episodes.value.any { episode ->
+            (episode.localPath == null && episode.audioUrl.isNotBlank()) ||
+                (episode.artworkPath == null && episode.artworkUrl.isNotBlank())
+        }
+        if (!hasWork) return
 
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -176,38 +192,104 @@ private fun enqueueEpisodeDownload(context: android.content.Context, episode: Wa
 fun PodcatchApp() {
     PodcatchTheme {
         val navController = rememberSwipeDismissableNavController()
-        Scaffold(timeText = { TimeText() }) {
-            SwipeDismissableNavHost(
-                navController = navController,
-                startDestination = "episodeList",
-            ) {
-                composable("episodeList") {
-                    EpisodeListScreen(
-                        onEpisodeClick = { episode ->
-                            navController.navigate(
-                                "player/${Uri.encode(episode.guid)}",
-                            )
-                        },
-                    )
-                }
-                composable("player/{guid}") { backStackEntry ->
-                    val guid = backStackEntry.arguments?.getString("guid") ?: return@composable
-                    EpisodePlayerScreen(
-                        guid = Uri.decode(guid),
-                        onVolumeClick = { navController.navigate("volume") },
-                    )
-                }
-                composable("volume") {
-                    VolumeScreen()
+        // Enables always-on, so the display dims into ambient with the app still
+        // shown, instead of the system covering it with a screenshot and the time.
+        AmbientAware { ambientState ->
+            val isAmbient = ambientState is AmbientState.Ambient
+            Scaffold(timeText = { if (!isAmbient) TimeText() }) {
+                SwipeDismissableNavHost(
+                    navController = navController,
+                    startDestination = "episodeList",
+                ) {
+                    composable("episodeList") {
+                        EpisodeListScreen(
+                            onEpisodeClick = { episode ->
+                                navController.navigate(
+                                    "player/${Uri.encode(episode.guid)}",
+                                )
+                            },
+                        )
+                    }
+                    composable("player/{guid}") { backStackEntry ->
+                        val guid = backStackEntry.arguments?.getString("guid")
+                            ?: return@composable
+                        EpisodePlayerScreen(
+                            guid = Uri.decode(guid),
+                            onVolumeClick = { navController.navigate("volume") },
+                            onSpeedClick = { navController.navigate("speed") },
+                        )
+                    }
+                    composable("volume") {
+                        VolumeScreen()
+                    }
+                    composable("speed") {
+                        val playerEntry = remember(navController) {
+                            navController.getBackStackEntry("player/{guid}")
+                        }
+                        val playerViewModel: EpisodePlayerViewModel = viewModel(
+                            viewModelStoreOwner = playerEntry,
+                        )
+                        SpeedScreen(
+                            currentSpeed = playerViewModel.currentSpeed,
+                            onSpeedSelected = { speed -> playerViewModel.setSpeed(speed) },
+                            onBack = { navController.popBackStack() },
+                        )
+                    }
                 }
             }
         }
     }
 }
 
+/** Yellow dot = new, ring = part-listened, grey check = finished. */
+@Composable
+private fun EpisodeStatusIndicator(progress: EpisodeProgress?, isPlaying: Boolean) {
+    if (isPlaying) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(18.dp)) {
+            CircularProgressIndicator(
+                progress = (progress?.fraction ?: 0f).coerceAtLeast(0.03f),
+                indicatorColor = MaterialTheme.colors.primary,
+                trackColor = Color.DarkGray,
+                strokeWidth = 2.dp,
+                modifier = Modifier.fillMaxSize(),
+            )
+            Icon(
+                imageVector = Icons.Rounded.PlayArrow,
+                contentDescription = "Playing",
+                tint = MaterialTheme.colors.primary,
+                modifier = Modifier.size(11.dp),
+            )
+        }
+        return
+    }
+    when (statusOf(progress)) {
+        EpisodeStatus.NEW -> Box(
+            modifier = Modifier
+                .size(10.dp)
+                .clip(CircleShape)
+                .background(Color(0xFFFFC107)),
+        )
+        EpisodeStatus.IN_PROGRESS -> CircularProgressIndicator(
+            progress = (progress?.fraction ?: 0f).coerceAtLeast(0.03f),
+            indicatorColor = MaterialTheme.colors.primary,
+            trackColor = Color.DarkGray,
+            strokeWidth = 3.dp,
+            modifier = Modifier.size(18.dp),
+        )
+        EpisodeStatus.COMPLETE -> Icon(
+            imageVector = Icons.Rounded.CheckCircle,
+            contentDescription = "Finished",
+            tint = Color.Gray,
+            modifier = Modifier.size(18.dp),
+        )
+    }
+}
+
 @Composable
 fun EpisodeListScreen(onEpisodeClick: (WatchEpisode) -> Unit) {
     val episodes by SyncedWatchEpisodes.episodes.collectAsState()
+    val progressByGuid by PlaybackState.progress.collectAsState()
+    val playingGuid by PlaybackState.playingGuid.collectAsState()
     ScalingLazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(top = 32.dp, start = 8.dp, end = 8.dp),
@@ -238,9 +320,11 @@ fun EpisodeListScreen(onEpisodeClick: (WatchEpisode) -> Unit) {
                         .alpha(if (isDownloaded) 1f else 0.6f),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (episode.artworkUrl.isNotBlank()) {
+                        val artworkModel = episode.artworkPath?.let { File(it) }
+                            ?: episode.artworkUrl.takeIf { it.isNotBlank() }
+                        if (artworkModel != null) {
                             AsyncImage(
-                                model = episode.artworkUrl,
+                                model = artworkModel,
                                 contentDescription = episode.podcastTitle,
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier
@@ -255,9 +339,10 @@ fun EpisodeListScreen(onEpisodeClick: (WatchEpisode) -> Unit) {
                                 style = MaterialTheme.typography.body2,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.basicMarquee(
-                                    animationMode = MarqueeAnimationMode.WhileFocused,
-                                ),
+                                // Holds for 1.2s, scrolls, repeats 3 times, then rests
+                                // on the start of the title. Defaults come from the
+                                // platform TextView marquee.
+                                modifier = Modifier.basicMarquee(),
                             )
                             Text(
                                 text = episode.podcastTitle,
@@ -268,11 +353,9 @@ fun EpisodeListScreen(onEpisodeClick: (WatchEpisode) -> Unit) {
                         }
                         Spacer(modifier = Modifier.width(6.dp))
                         if (isDownloaded) {
-                            Icon(
-                                imageVector = Icons.Rounded.CheckCircle,
-                                contentDescription = "Downloaded",
-                                tint = Color(0xFF4CAF50),
-                                modifier = Modifier.size(18.dp),
+                            EpisodeStatusIndicator(
+                                progress = progressByGuid[episode.guid],
+                                isPlaying = episode.guid == playingGuid,
                             )
                         } else if (episode.downloadProgress > 0) {
                             Text(

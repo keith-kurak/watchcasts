@@ -4,16 +4,23 @@ import android.app.Application
 import android.content.ComponentName
 import android.os.Vibrator
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.wear.compose.material.Button
+import androidx.wear.compose.material.ButtonDefaults
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -30,20 +37,22 @@ import com.google.android.horologist.audio.ui.components.actions.SetVolumeButton
 import com.google.android.horologist.media.data.repository.PlayerRepositoryImpl
 import com.google.android.horologist.media.model.Media
 import com.google.android.horologist.media.ui.components.PodcastControlButtons
-import com.google.android.horologist.media.ui.screens.player.DefaultMediaInfoDisplay
+import com.google.android.horologist.media.ui.components.animated.AnimatedMediaInfoDisplay
 import com.google.android.horologist.media.ui.screens.player.PlayerScreen
 import com.google.android.horologist.media.ui.state.PlayerUiState
+import com.google.android.horologist.media.ui.state.model.MediaUiModel
 import com.google.android.horologist.media.ui.state.PlayerViewModel
 import dev.podcatch.app.data.SyncedWatchEpisodes
 import dev.podcatch.app.data.WatchEpisode
 import dev.podcatch.app.playback.PlaybackService
 import dev.podcatch.app.playback.PlaybackState
+import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalHorologistApi::class)
 @Composable
-fun EpisodePlayerScreen(guid: String, onVolumeClick: () -> Unit) {
+fun EpisodePlayerScreen(guid: String, onVolumeClick: () -> Unit, onSpeedClick: () -> Unit) {
     val episodes by SyncedWatchEpisodes.episodes.collectAsState()
     val episode = episodes.find { it.guid == guid }
     if (episode == null || episode.localPath == null) return
@@ -104,10 +113,25 @@ fun EpisodePlayerScreen(guid: String, onVolumeClick: () -> Unit) {
             )
         },
         buttons = { _ ->
-            SetVolumeButton(
-                onVolumeClick = onVolumeClick,
-                volumeUiState = volumeUiState,
-            )
+            Row {
+                SetVolumeButton(
+                    onVolumeClick = onVolumeClick,
+                    volumeUiState = volumeUiState,
+                )
+                Button(
+                    onClick = onSpeedClick,
+                    modifier = Modifier.size(ButtonDefaults.SmallButtonSize),
+                    colors = ButtonDefaults.secondaryButtonColors(),
+                ) {
+                    val speed = playerViewModel.currentSpeed
+                    val label = if (speed == speed.toInt().toFloat()) {
+                        "${speed.toInt()}x"
+                    } else {
+                        "${speed}x"
+                    }
+                    Text(label, style = MaterialTheme.typography.caption2)
+                }
+            }
         },
     )
 }
@@ -122,8 +146,12 @@ class EpisodePlayerViewModel(
     var controller: MediaController? = null
         private set
 
+    var currentSpeed by mutableFloatStateOf(1.0f)
+        private set
+
     init {
         PlaybackState.init(application)
+        currentSpeed = PlaybackState.getSavedSpeed()
 
         viewModelScope.launch {
             val sessionToken = SessionToken(
@@ -135,47 +163,98 @@ class EpisodePlayerViewModel(
                 .await()
             controller = ctrl
 
-            // If the service is already playing this episode, just reconnect
-            // the UI without resetting playback.
-            if (PlaybackState.currentGuid == episode.guid) {
+            // The player itself is the source of truth for what is loaded — after
+            // a process restart the in-memory currentGuid is gone, but the service
+            // may still hold this episode.
+            val loadedGuid = ctrl.currentMediaItem?.mediaId
+            if (loadedGuid == episode.guid) {
                 repository.connect(ctrl) {}
+                ctrl.setPlaybackSpeed(currentSpeed)
+                PlaybackState.setCurrentEpisode(episode.guid)
+                startPositionAutosave()
                 return@launch
             }
 
-            // Save position of the currently playing episode before switching
-            val prevGuid = PlaybackState.currentGuid
-            if (prevGuid != null && ctrl.currentPosition > 0L) {
-                PlaybackState.savePosition(prevGuid, ctrl.currentPosition)
+            // Save position of the previously loaded episode before switching
+            if (loadedGuid != null && ctrl.currentPosition > 0L) {
+                PlaybackState.savePosition(
+                    loadedGuid,
+                    ctrl.currentPosition,
+                    ctrl.duration.coerceAtLeast(0L),
+                )
             }
 
             repository.connect(ctrl) {}
-            repository.setMedia(
-                Media(
-                    id = episode.guid,
-                    uri = episode.localPath ?: "",
-                    title = episode.title,
-                    artist = episode.podcastTitle,
+
+            // Restore the saved position as the start position — seeking after
+            // setMedia is not reliable while the player is still idle.
+            // A finished episode starts over.
+            val saved = PlaybackState.getProgress(episode.guid)
+            val startPosition = if (saved.completed) 0L else saved.positionMs
+
+            repository.setMediaList(
+                listOf(
+                    Media(
+                        id = episode.guid,
+                        uri = episode.localPath ?: "",
+                        title = episode.title,
+                        artist = episode.podcastTitle,
+                    ),
                 ),
+                index = 0,
+                position = startPosition.milliseconds,
             )
 
             PlaybackState.setCurrentEpisode(episode.guid)
 
-            // Restore saved position for this episode
-            val savedPosition = PlaybackState.getSavedPosition(episode.guid)
-            if (savedPosition > 0L) {
-                ctrl.seekTo(savedPosition)
+            ctrl.setPlaybackSpeed(currentSpeed)
+
+            startPositionAutosave()
+        }
+    }
+
+    /**
+     * Persist the position every few seconds. onCleared/onDestroy do not run when
+     * the app is force-closed, so periodic saves are what survive a kill.
+     */
+    private fun startPositionAutosave() {
+        viewModelScope.launch {
+            while (true) {
+                delay(POSITION_SAVE_INTERVAL_MS)
+                val ctrl = controller ?: continue
+                if (!ctrl.isConnected) continue
+                if (ctrl.currentMediaItem?.mediaId != episode.guid) continue
+                PlaybackState.savePosition(
+                    episode.guid,
+                    ctrl.currentPosition,
+                    ctrl.duration.coerceAtLeast(0L),
+                )
             }
         }
+    }
+
+    fun setSpeed(speed: Float) {
+        currentSpeed = speed
+        controller?.setPlaybackSpeed(speed)
+        PlaybackState.saveSpeed(speed)
     }
 
     override fun onCleared() {
         // Save position of current episode
         controller?.let { ctrl ->
-            if (PlaybackState.currentGuid == episode.guid && ctrl.isConnected) {
-                PlaybackState.savePosition(episode.guid, ctrl.currentPosition)
+            if (ctrl.isConnected && ctrl.currentMediaItem?.mediaId == episode.guid) {
+                PlaybackState.savePosition(
+                    episode.guid,
+                    ctrl.currentPosition,
+                    ctrl.duration.coerceAtLeast(0L),
+                )
             }
         }
         super.onCleared()
+    }
+
+    companion object {
+        private const val POSITION_SAVE_INTERVAL_MS = 5_000L
     }
 }
 
@@ -187,7 +266,11 @@ private fun MediaInfoWithElapsed(
     durationMs: Long,
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        DefaultMediaInfoDisplay(playerUiState)
+        // Scrolls a long episode title instead of truncating it, with edge fades.
+        AnimatedMediaInfoDisplay(
+            media = playerUiState.media,
+            loading = !playerUiState.connected || playerUiState.media is MediaUiModel.Loading,
+        )
         if (durationMs > 0L) {
             Text(
                 text = "${formatTime(elapsedMs)} / ${formatTime(durationMs)}",
