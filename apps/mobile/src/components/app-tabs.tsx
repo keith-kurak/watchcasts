@@ -26,6 +26,11 @@ export default function AppTabs() {
         <NativeTabs.Trigger.Label>Phone</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf="iphone" md="smartphone" />
       </NativeTabs.Trigger>
+
+      <NativeTabs.Trigger name="(settings)">
+        <NativeTabs.Trigger.Label>Settings</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf="gearshape" md="settings" />
+      </NativeTabs.Trigger>
     </NativeTabs>
   );
 }

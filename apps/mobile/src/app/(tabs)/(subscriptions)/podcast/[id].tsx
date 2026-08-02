@@ -1,17 +1,21 @@
 import { LegendList } from '@legendapp/list/react-native';
+import { useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
+import { SymbolView } from 'expo-symbols';
 import { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { DownloadToggle } from '@/components/download-toggle';
+import { RemoveDialog } from '@/components/remove-dialog';
 import { WatchToggle } from '@/components/watch-toggle';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { NowPlayingBarHeight, Spacing } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
 import { formatDate, formatDuration } from '@/lib/format';
 import { useFeedQuery } from '@/lib/queries';
-import { getSubscriptions } from '@/lib/storage';
+import { getSubscriptions, removeSubscription } from '@/lib/storage';
 import type { Podcast } from '@/lib/types';
 
 const EPISODES_PER_PAGE = 20;
@@ -20,6 +24,8 @@ const ESTIMATED_ROW_HEIGHT = 84;
 export default function PodcastScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const queryClient = useQueryClient();
+  const theme = useTheme();
 
   const podcast: Podcast | undefined = getSubscriptions().find((s) => s.id === id);
   const { data: episodes = [], isLoading, refetch, isRefetching } = useFeedQuery(
@@ -38,9 +44,37 @@ export default function PodcastScreen() {
     setVisibleCount((count) => Math.min(count + EPISODES_PER_PAGE, episodes.length));
   }, [episodes.length]);
 
+  const [showUnsubscribeDialog, setShowUnsubscribeDialog] = useState(false);
+
+  function handleUnsubscribe() {
+    removeSubscription(id);
+    setShowUnsubscribeDialog(false);
+    queryClient.removeQueries({ queryKey: ['feed', id] });
+    router.back();
+  }
+
   return (
     <ThemedView style={styles.container}>
-      <Stack.Screen options={{ title: podcast?.title ?? 'Podcast' }} />
+      <Stack.Screen
+        options={{
+          title: podcast?.title ?? 'Podcast',
+          headerRight: () => (
+            <Pressable
+              onPress={() => setShowUnsubscribeDialog(true)}
+              hitSlop={8}
+              accessibilityLabel="Unsubscribe"
+            >
+              <View pointerEvents="none">
+                <SymbolView
+                  name={{ ios: 'trash', android: 'delete' }}
+                  size={24}
+                  tintColor={theme.text}
+                />
+              </View>
+            </Pressable>
+          ),
+        }}
+      />
       <LegendList
         data={visibleEpisodes}
         keyExtractor={(item) => item.guid}
@@ -97,6 +131,13 @@ export default function PodcastScreen() {
             </ThemedText>
           )
         }
+      />
+      <RemoveDialog
+        visible={showUnsubscribeDialog}
+        title="Unsubscribe?"
+        message={`This will remove ${podcast?.title ?? 'this podcast'} and its cached episodes.`}
+        onConfirm={handleUnsubscribe}
+        onDismiss={() => setShowUnsubscribeDialog(false)}
       />
     </ThemedView>
   );
