@@ -1,6 +1,8 @@
+import { LegendList } from '@legendapp/list/react-native';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
-import { FlatList, Pressable, StyleSheet, View } from 'react-native';
+import { useCallback, useMemo, useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { DownloadToggle } from '@/components/download-toggle';
 import { WatchToggle } from '@/components/watch-toggle';
@@ -12,6 +14,9 @@ import { useFeedQuery } from '@/lib/queries';
 import { getSubscriptions } from '@/lib/storage';
 import type { Podcast } from '@/lib/types';
 
+const EPISODES_PER_PAGE = 20;
+const ESTIMATED_ROW_HEIGHT = 84;
+
 export default function PodcastScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -22,14 +27,29 @@ export default function PodcastScreen() {
     podcast?.feedUrl ?? '',
   );
 
+  const [visibleCount, setVisibleCount] = useState(EPISODES_PER_PAGE);
+  const visibleEpisodes = useMemo(
+    () => episodes.slice(0, visibleCount),
+    [episodes, visibleCount],
+  );
+  const hasMore = visibleCount < episodes.length;
+
+  const loadNextPage = useCallback(() => {
+    setVisibleCount((count) => Math.min(count + EPISODES_PER_PAGE, episodes.length));
+  }, [episodes.length]);
+
   return (
     <ThemedView style={styles.container}>
       <Stack.Screen options={{ title: podcast?.title ?? 'Podcast' }} />
-      <FlatList
-        data={episodes}
+      <LegendList
+        data={visibleEpisodes}
         keyExtractor={(item) => item.guid}
+        estimatedItemSize={ESTIMATED_ROW_HEIGHT}
+        recycleItems
         refreshing={isRefetching}
         onRefresh={() => refetch()}
+        onEndReached={hasMore ? loadNextPage : undefined}
+        onEndReachedThreshold={0.5}
         contentContainerStyle={styles.list}
         renderItem={({ item }) => (
           <Pressable
@@ -67,6 +87,9 @@ export default function PodcastScreen() {
             <DownloadToggle podcastId={id} episodeGuid={item.guid} audioUrl={item.audioUrl} />
           </Pressable>
         )}
+        ListFooterComponent={
+          hasMore ? <ActivityIndicator style={styles.footerSpinner} /> : null
+        }
         ListEmptyComponent={
           isLoading ? null : (
             <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
@@ -86,11 +109,13 @@ const styles = StyleSheet.create({
   list: {
     padding: Spacing.three,
     paddingBottom: Spacing.three + NowPlayingBarHeight,
-    gap: Spacing.one,
   },
   episodeRow: {
     flexDirection: 'row',
     paddingVertical: Spacing.three,
+    // Row spacing lives here rather than as a contentContainerStyle gap, which
+    // a virtualized list cannot apply to its absolutely positioned items.
+    marginBottom: Spacing.one,
     gap: Spacing.three,
     alignItems: 'center',
   },
@@ -109,6 +134,9 @@ const styles = StyleSheet.create({
   episodeMeta: {
     flexDirection: 'row',
     gap: Spacing.three,
+  },
+  footerSpinner: {
+    paddingVertical: Spacing.three,
   },
   emptyText: {
     textAlign: 'center',

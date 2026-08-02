@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "dependencies": {
     "@expo/ui": "~57.0.7",
+    "@legendapp/list": "^3.3.3",
     "@podcatch/shared": "workspace:*",
     "@tanstack/react-query": "^5.101.2",
     "expo": "^57.0.0",
