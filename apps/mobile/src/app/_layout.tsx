@@ -7,6 +7,7 @@ import { useColorScheme } from 'react-native';
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { AudioProvider } from '@/lib/audio-context';
 import { DownloadProvider } from '@/lib/download-context';
+import { WatchStatusProvider } from '@/lib/watch-status-context';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -21,6 +22,7 @@ export default function RootLayout() {
   return (
     <QueryClientProvider client={queryClient}>
       <DownloadProvider>
+      <WatchStatusProvider>
       <AudioProvider>
         <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
           <StatusBar style="auto" />
@@ -30,6 +32,7 @@ export default function RootLayout() {
           </Stack>
         </ThemeProvider>
       </AudioProvider>
+      </WatchStatusProvider>
       </DownloadProvider>
     </QueryClientProvider>
   );

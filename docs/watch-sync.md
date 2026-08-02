@@ -58,6 +58,7 @@ A change to one without the others breaks sync **silently** — no compile error
 |---|---|---|
 | `/podcatch/subscriptions` | `{ items, updatedAt }` | phone → watch |
 | `/podcatch/watch-episodes` | `{ items, updatedAt }` | phone → watch |
+| `/podcatch/settings` | `{ items, updatedAt }` | phone → watch |
 
 `items` is a JSON **string** under the DataMap key `items`. `updatedAt` is a long under `updatedAt`.
 
@@ -71,7 +72,22 @@ Messages are fire-and-forget. They are dropped if the peer is unreachable.
 | `/podcatch/request-download-status` | phone → watch | empty | `requestWatchDownloadStatus()` |
 | `/podcatch/watch-download-status` | watch → phone | JSON array | `WatchDownloadStatusReporter` |
 
-> `datalayer.ts` documents `REQUEST_SYNC` as "Watch -> phone". That is wrong — the phone sends it. See [Known issues](#known-issues).
+### Settings
+
+`/podcatch/settings` carries settings the phone owns and the watch honours. Payload today:
+
+```json
+{ "wifiOnlyDownloads": true }
+```
+
+The watch stores it in `SharedPreferences("watch-settings")` via `SyncedSettings`, for the
+same reason the episode list is persisted — a worker can run in a fresh process. Its default
+(`true`) matches the phone's, so the two agree before any sync has happened.
+
+`SyncedSettings.load()` is called from `MainActivity.onCreate`, the settings branch of
+`DataLayerListenerService`, `WatchDownloadStatusReporter`, and
+`EpisodeDownloadWorker.buildRequest`. `MainActivity.onResume` also reads the replicated
+DataItem directly, so a freshly installed watch picks up an existing preference.
 
 ### Capabilities
 
@@ -174,7 +190,15 @@ Four call sites enqueue the worker. All use the unique work name `episode-downlo
 | `MainActivity.enqueueDownloads` | Activity resumed, or live data change |
 | `retryEpisodeDownload` (`MainActivity.kt`) | User chose Retry from the long-press menu |
 
-All four set `NetworkType.CONNECTED`. They differ in whether they ask for expedited work.
+All go through `EpisodeDownloadWorker.buildRequest`, so the network constraint cannot drift
+between them: `NetworkType.UNMETERED` when Wi-Fi-only downloads are on, `CONNECTED` otherwise.
+
+**The constraint is fixed at enqueue time.** A request queued under the old setting would
+outlive a change to it, so the settings branch of `DataLayerListenerService` re-enqueues with
+`ExistingWorkPolicy.REPLACE`. Replacing a running worker is safe — partial downloads resume
+from their `.tmp`.
+
+The sites differ in whether they ask for expedited work.
 
 Expedited quota is finite and per-app, so it is **reserved for triggers where a person is
 waiting.** Spending it on every automatic list sync is what left none for a deliberate
@@ -301,8 +325,13 @@ Per episode it derives:
 
 | Field | Rule |
 |---|---|
-| `status` | `complete` if `localPath != null`, else `error` if `error`, else `downloading` if `downloadProgress > 0`, else `pending` |
-| `progress` | `100` if complete, `0` if error, else `downloadProgress` |
+| `status` | `complete` if `localPath != null`, else `error` if `error`, else `downloading` if `downloadProgress != 0`, else `waiting-wifi` if held by the Wi-Fi-only setting, else `pending` |
+| `progress` | `100` if complete, `0` if error, else `max(downloadProgress, 0)` |
+
+`waiting-wifi` exists so the phone can say *why* nothing is happening. The watch derives it
+from `SyncedSettings.isWaitingForWifi`, which checks `NET_CAPABILITY_NOT_METERED` — the same
+signal WorkManager's `UNMETERED` constraint uses, so the reported status and the constraint
+that actually gates the work cannot disagree.
 
 It is called after every meaningful state transition: list update, download start, each ~5% step, completion, failure, and on request from the phone.
 
@@ -357,10 +386,13 @@ K9 is deferred as T2, and disappears if T1 (OkHttp) lands first.
 
 ### Documentation drift
 
-| # | Issue |
-|---|---|
-| K14 | `datalayer.ts` says the contract is mirrored in two places. It is three — `WearDataLayerModule.kt` has its own private copies. |
-| K15 | `datalayer.ts` documents `REQUEST_SYNC` as "Watch -> phone". The phone sends it. |
+| # | Issue | Fixed in |
+|---|---|---|
+| ~~K14~~ | `datalayer.ts` claimed the contract was mirrored in two places; it is three | Wi-Fi-only setting |
+| ~~K15~~ | `datalayer.ts` documented `REQUEST_SYNC` as "Watch -> phone"; the phone sends it | Wi-Fi-only setting |
+
+The comments are corrected, but the duplication itself remains. T4 in `docs/todo.md` still
+tracks generating the two Kotlin mirrors from `datalayer.ts`.
 
 ### Deferred
 
@@ -373,6 +405,28 @@ duplication).
 ## 8. Change log
 
 Newest first. Add an entry whenever sync behavior changes.
+
+### 2026-08-02 — Wi-Fi-only downloads
+
+New setting, owned by the phone and honoured by both apps. Also fixes **K14** and **K15**.
+
+- New Data Layer path `/podcatch/settings`, mirrored into all three contract files. Payload
+  is `{ wifiOnlyDownloads: boolean }`, default `true` on both sides.
+- Watch: new `SyncedSettings`, persisted to `SharedPreferences("watch-settings")`.
+- Watch: all enqueue sites now build their request through
+  `EpisodeDownloadWorker.buildRequest`, which picks `UNMETERED` vs `CONNECTED`. A settings
+  change re-enqueues with `REPLACE`, since the constraint is fixed at enqueue time.
+- New wire status `waiting-wifi`, derived from `NET_CAPABILITY_NOT_METERED` so it agrees
+  with the WorkManager constraint. Rendered as "Waiting for Wi-Fi" on the phone and a
+  wifi-off icon on the watch.
+- Phone: gated in `DownloadProvider` using `expo-network` (new dependency). Queued items
+  stay `pending` and drain automatically when an unmetered network returns.
+- Phone: the mount-time cleanup no longer marks `pending` items as errored — with this
+  setting, `pending` is a legitimate resting state.
+
+Verified end to end on both emulators: toggling the switch wrote `wifiOnlyDownloads=false`
+to the watch's prefs; with Wi-Fi disabled a queued episode showed "Waiting for Wi-Fi" and did
+not download; re-enabling Wi-Fi drained the queue without further input.
 
 ### 2026-08-02 — Phase 3: manual retry only
 

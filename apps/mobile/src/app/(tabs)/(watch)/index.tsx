@@ -2,7 +2,7 @@ import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
 import { Stack, useRouter } from 'expo-router';
 import { memo, useCallback, useEffect, useState } from 'react';
-import { FlatList, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, FlatList, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -11,8 +11,12 @@ import { useTheme } from '@/hooks/use-theme';
 import { formatDate, formatDuration } from '@/lib/format';
 import { useWatchListQuery, useWatchListMutations, type EnrichedDownloadItem } from '@/lib/queries';
 import { getSubscriptions } from '@/lib/storage';
-import { getConnectedNodes, sendForceDownload, requestWatchDownloadStatus, useWatchDownloadStatusListener } from '@/hooks/useWearDataLayer';
+import { getConnectedNodes, sendForceDownload, requestWatchDownloadStatus } from '@/hooks/useWearDataLayer';
+import { useWatchStatuses } from '@/lib/watch-status-context';
 import type { WatchEpisodeStatus } from '../../modules/wear-data-layer/src';
+
+/** Minimum time the refresh spinner stays visible, so it does not just flicker. */
+const MIN_SPINNER_MS = 600;
 
 const WatchRow = memo(function WatchRow({
   item,
@@ -57,6 +61,11 @@ const WatchRow = memo(function WatchRow({
               Waiting…
             </ThemedText>
           )}
+          {status === 'waiting-wifi' && (
+            <ThemedText type="small" style={styles.waitingText}>
+              Waiting for Wi-Fi
+            </ThemedText>
+          )}
           {status === 'error' && (
             <ThemedText type="small" style={{ color: '#FF3B30' }}>
               Error
@@ -92,10 +101,11 @@ export default function WatchScreen() {
   const router = useRouter();
   const theme = useTheme();
   const subscriptions = getSubscriptions();
-  const watchStatuses = useWatchDownloadStatusListener();
+  const watchStatuses = useWatchStatuses();
   const { data: watchList = [], isLoading, refetch, isRefetching } = useWatchListQuery(subscriptions);
   const { triggerSync } = useWatchListMutations();
   const [connected, setConnected] = useState<boolean | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   const checkConnection = useCallback(() => {
     if (Platform.OS !== 'android') {
@@ -109,20 +119,40 @@ export default function WatchScreen() {
     checkConnection();
   }, [checkConnection]);
 
-  const handleRefresh = useCallback(() => {
-    checkConnection();
-    triggerSync();
-    sendForceDownload().catch(() => {});
-    requestWatchDownloadStatus().catch(() => {});
-  }, [checkConnection, triggerSync]);
+  const handleRefresh = useCallback(async () => {
+    if (isSyncing) return;
+    setIsSyncing(true);
+    try {
+      checkConnection();
+      triggerSync();
+      await Promise.all([
+        sendForceDownload().catch(() => {}),
+        requestWatchDownloadStatus().catch(() => {}),
+      ]);
+      // These resolve as soon as the messages are handed to the Data Layer, which is
+      // near-instant. Hold the spinner briefly so the refresh reads as an action
+      // rather than a flicker.
+      await new Promise((resolve) => setTimeout(resolve, MIN_SPINNER_MS));
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [checkConnection, triggerSync, isSyncing]);
 
   return (
     <ThemedView style={styles.container}>
       <Stack.Screen
         options={{
           headerRight: () => (
-            <Pressable onPress={handleRefresh}>
-              <SymbolView name={{ ios: 'arrow.trianglehead.2.clockwise', android: 'sync' }} size={22} tintColor={theme.text} />
+            <Pressable onPress={handleRefresh} disabled={isSyncing} hitSlop={8}>
+              {isSyncing ? (
+                <ActivityIndicator size="small" color={theme.text} />
+              ) : (
+                <SymbolView
+                  name={{ ios: 'arrow.trianglehead.2.clockwise', android: 'sync' }}
+                  size={22}
+                  tintColor={theme.text}
+                />
+              )}
             </Pressable>
           ),
         }}
@@ -204,6 +234,9 @@ const styles = StyleSheet.create({
     height: 3,
     borderRadius: 1.5,
     overflow: 'hidden',
+  },
+  waitingText: {
+    color: '#FFB300',
   },
   progressFill: {
     height: '100%',

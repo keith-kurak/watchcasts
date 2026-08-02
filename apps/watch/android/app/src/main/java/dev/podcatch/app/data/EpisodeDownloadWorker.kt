@@ -6,8 +6,13 @@ import android.content.Context
 import android.content.pm.ServiceInfo
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequest
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkerParameters
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -240,6 +245,31 @@ class EpisodeDownloadWorker(
         private const val TAG = "EpisodeDownload"
         private const val NOTIFICATION_ID = 1001
         const val UNIQUE_WORK_NAME = "episode-downloads"
+
+        /**
+         * Build a download request honouring the current Wi-Fi-only setting.
+         *
+         * Every enqueue site goes through here so the constraint cannot drift between
+         * them. Note the constraint is fixed at enqueue time: changing the setting
+         * requires a fresh enqueue to take effect.
+         *
+         * @param expedited ask the system to start now. Expedited quota is finite and
+         * per-app, so it is reserved for triggers where a person is waiting.
+         */
+        fun buildRequest(context: Context, expedited: Boolean): OneTimeWorkRequest {
+            SyncedSettings.load(context)
+            val networkType = if (SyncedSettings.wifiOnlyDownloads.value) {
+                NetworkType.UNMETERED
+            } else {
+                NetworkType.CONNECTED
+            }
+            return OneTimeWorkRequestBuilder<EpisodeDownloadWorker>()
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(networkType).build())
+                .apply {
+                    if (expedited) setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+                }
+                .build()
+        }
 
         private const val CONNECT_TIMEOUT_MS = 15_000
         private const val READ_TIMEOUT_MS = 30_000

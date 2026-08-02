@@ -25,6 +25,10 @@ object WatchDownloadStatusReporter {
             return
         }
 
+        // Computed once: it hits ConnectivityManager and cannot change mid-report.
+        SyncedSettings.load(context)
+        val waitingForWifi = SyncedSettings.isWaitingForWifi(context)
+
         val array = JSONArray()
         for (ep in episodes) {
             val status = when {
@@ -33,6 +37,8 @@ object WatchDownloadStatusReporter {
                 // Non-zero covers EpisodeDownloadWorker.INDETERMINATE (-1), which means
                 // "downloading, total size unknown".
                 ep.downloadProgress != 0 -> "downloading"
+                // Say *why* nothing is happening rather than a bare "pending".
+                waitingForWifi -> "waiting-wifi"
                 else -> "pending"
             }
             val progress = when {

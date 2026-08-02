@@ -14,9 +14,10 @@ import { getSubscriptions } from '@/lib/storage';
 function DownloadRow({ item }: { item: EnrichedDownloadItem }) {
   const router = useRouter();
   const theme = useTheme();
-  const { getProgress } = useDownloadContext();
+  const { getProgress, isWaitingForWifi } = useDownloadContext();
   const progress = getProgress(item.episodeGuid);
   const isDownloading = item.status === 'downloading' || progress != null;
+  const waitingForWifi = item.status === 'pending' && !isDownloading && isWaitingForWifi;
 
   return (
     <Pressable
@@ -41,6 +42,11 @@ function DownloadRow({ item }: { item: EnrichedDownloadItem }) {
           {isDownloading && (
             <ThemedText type="small" themeColor="textSecondary">
               Downloading… {progress != null ? `${Math.round(progress * 100)}%` : ''}
+            </ThemedText>
+          )}
+          {waitingForWifi && (
+            <ThemedText type="small" style={styles.waitingText}>
+              Waiting for Wi-Fi
             </ThemedText>
           )}
           {item.status === 'error' && (
@@ -139,6 +145,9 @@ const styles = StyleSheet.create({
     height: '100%',
     backgroundColor: '#007AFF',
     borderRadius: 1.5,
+  },
+  waitingText: {
+    color: '#FFB300',
   },
   emptyText: {
     textAlign: 'center',

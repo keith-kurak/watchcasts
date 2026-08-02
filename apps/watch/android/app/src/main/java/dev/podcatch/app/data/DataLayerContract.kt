@@ -3,14 +3,18 @@ package dev.podcatch.app.data
 /**
  * Kotlin mirror of packages/shared/src/datalayer.ts.
  *
- * The phone app (TypeScript) and this watch app (Kotlin) cannot share code, so
- * this contract is duplicated by hand. ANY change on one side must be made here
- * too, or phone <-> watch sync breaks silently.
+ * The phone app (TypeScript) and this watch app (Kotlin) cannot share code, so this
+ * contract is duplicated by hand — in THREE places. The third is the phone's native
+ * bridge:
+ *     apps/mobile/modules/wear-data-layer/android/.../WearDataLayerModule.kt
+ *
+ * ANY change must be made in all three, or phone <-> watch sync breaks silently.
  */
 object DataLayerContract {
     // DataClient item paths (persistent, replicated DataItems)
     const val PATH_SUBSCRIPTIONS = "/podcatch/subscriptions"
     const val PATH_WATCH_EPISODES = "/podcatch/watch-episodes"
+    const val PATH_SETTINGS = "/podcatch/settings"
     // MessageClient paths (transient RPC)
     const val PATH_REQUEST_SYNC = "/podcatch/request-sync"
     const val PATH_REQUEST_DOWNLOAD_STATUS = "/podcatch/request-download-status"

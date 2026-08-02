@@ -1,10 +1,7 @@
 package dev.podcatch.app.data
 
 import android.util.Log
-import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
-import androidx.work.NetworkType
-import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import com.google.android.gms.wearable.DataEvent
 import com.google.android.gms.wearable.DataEventBuffer
@@ -25,6 +22,14 @@ class DataLayerListenerService : WearableListenerService() {
                 DataLayerContract.PATH_SUBSCRIPTIONS -> {
                     Log.d(TAG, "Subscriptions synced (updatedAt=$updatedAt)")
                     SyncedSubscriptions.update(json)
+                }
+                DataLayerContract.PATH_SETTINGS -> {
+                    Log.d(TAG, "Settings synced (updatedAt=$updatedAt)")
+                    SyncedSettings.load(applicationContext)
+                    SyncedSettings.update(json)
+                    SyncedWatchEpisodes.load(applicationContext)
+                    WatchDownloadStatusReporter.reportStatus(applicationContext)
+                    enqueueDownloads(expedited = false, replaceExisting = true)
                 }
                 DataLayerContract.PATH_WATCH_EPISODES -> {
                     Log.d(TAG, "Watch episodes synced (updatedAt=$updatedAt)")
@@ -61,34 +66,23 @@ class DataLayerListenerService : WearableListenerService() {
     }
 
     /**
-     * @param expedited ask the system to start the work now. Expedited quota is finite
-     * and per-app, so it is reserved for triggers where a person is waiting. Spending it
-     * on every automatic list sync is what leaves none for a deliberate request.
+     * @param replaceExisting use REPLACE instead of KEEP. The network constraint is
+     * baked into the request at enqueue time, so a request queued under the old
+     * Wi-Fi-only setting would outlive a change to it. Replacing a running worker is
+     * safe — partial downloads resume from their `.tmp`.
      */
-    private fun enqueueDownloads(expedited: Boolean) {
+    private fun enqueueDownloads(expedited: Boolean, replaceExisting: Boolean = false) {
         val hasUndownloaded = SyncedWatchEpisodes.episodes.value
             .any { it.localPath == null && it.audioUrl.isNotBlank() }
         if (!hasUndownloaded) return
 
-        val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .build()
-
-        val request = OneTimeWorkRequestBuilder<EpisodeDownloadWorker>()
-            .setConstraints(constraints)
-            .apply {
-                if (expedited) {
-                    setExpedited(androidx.work.OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
-                }
-            }
-            .build()
-
+        val policy = if (replaceExisting) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP
         WorkManager.getInstance(applicationContext).enqueueUniqueWork(
             EpisodeDownloadWorker.UNIQUE_WORK_NAME,
-            ExistingWorkPolicy.KEEP,
-            request,
+            policy,
+            EpisodeDownloadWorker.buildRequest(applicationContext, expedited),
         )
-        Log.d(TAG, "Enqueued episode download worker (expedited=$expedited)")
+        Log.d(TAG, "Enqueued episode download worker (expedited=$expedited, policy=$policy)")
     }
 
     companion object {

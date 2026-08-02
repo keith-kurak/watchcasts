@@ -1,7 +1,7 @@
-import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import { BadgedIcon, type DestinationState } from '@/components/badged-icon';
 import { RemoveDialog } from '@/components/remove-dialog';
 import { useDownloadContext } from '@/lib/download-context';
 import { useDownloadMutations, useIsInDownloads } from '@/lib/queries';
@@ -33,25 +33,24 @@ export function DownloadToggle({ podcastId, episodeGuid, audioUrl }: DownloadTog
     }
   }
 
-  let iconName: { ios: string; android: string };
-  let tintColor: string;
-
+  let state: DestinationState;
   if (status === 'complete') {
-    iconName = { ios: 'iphone', android: 'smartphone' };
-    tintColor = '#34C759';
+    state = 'complete';
+  } else if (status === 'error') {
+    state = 'error';
   } else if (isDownloading) {
-    iconName = { ios: 'arrow.down.circle.dotted', android: 'downloading' };
-    tintColor = '#007AFF';
+    state = 'downloading';
+  } else if (isDownloaded) {
+    state = 'pending';
   } else {
-    iconName = { ios: 'iphone', android: 'smartphone' };
-    tintColor = '#8E8E93';
+    state = 'idle';
   }
 
   return (
     <>
       <Pressable onPress={handlePress} style={styles.button} hitSlop={8}>
         <View pointerEvents="none">
-          <SymbolView name={iconName} size={24} tintColor={tintColor} />
+          <BadgedIcon name={{ ios: 'iphone', android: 'smartphone' }} state={state} />
         </View>
       </Pressable>
       <RemoveDialog

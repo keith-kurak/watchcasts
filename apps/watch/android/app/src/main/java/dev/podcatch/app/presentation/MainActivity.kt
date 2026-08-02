@@ -25,6 +25,7 @@ import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.SignalWifiOff
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -63,10 +64,7 @@ import com.google.android.horologist.annotations.ExperimentalHorologistApi
 import com.google.android.horologist.audio.ui.VolumeScreen
 import com.google.android.horologist.compose.ambient.AmbientAware
 import com.google.android.horologist.compose.ambient.AmbientState
-import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
-import androidx.work.NetworkType
-import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import coil.compose.AsyncImage
 import com.google.android.gms.wearable.DataClient
@@ -77,6 +75,7 @@ import com.google.android.gms.wearable.Wearable
 import dev.podcatch.app.data.DataLayerContract
 import dev.podcatch.app.data.EpisodeDownloadWorker
 import dev.podcatch.app.data.WatchEpisode
+import dev.podcatch.app.data.SyncedSettings
 import dev.podcatch.app.data.SyncedSubscriptions
 import dev.podcatch.app.data.SyncedWatchEpisodes
 import dev.podcatch.app.data.WatchDownloadStatusReporter
@@ -94,6 +93,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
         super.onCreate(savedInstanceState)
         SyncedWatchEpisodes.load(this)
         SyncedWatchEpisodes.artworkDir?.mkdirs()
+        SyncedSettings.load(this)
         PlaybackState.init(this)
         setContent { PodcatchApp() }
     }
@@ -109,6 +109,10 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
                     val dataMap = DataMapItem.fromDataItem(item).dataMap
                     val json = dataMap.getString(DataLayerContract.KEY_ITEMS)
                     when (item.uri.path) {
+                        DataLayerContract.PATH_SETTINGS -> {
+                            Log.d(TAG, "Read existing settings from Data Layer")
+                            SyncedSettings.update(json)
+                        }
                         DataLayerContract.PATH_SUBSCRIPTIONS -> {
                             Log.d(TAG, "Read existing subscriptions from Data Layer")
                             SyncedSubscriptions.update(json)
@@ -157,21 +161,12 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
         }
         if (!hasWork) return
 
-        val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .build()
-
-        val request = OneTimeWorkRequestBuilder<EpisodeDownloadWorker>()
-            .setConstraints(constraints)
-            // Expedited: the watch app is open, so someone is waiting on this. The
-            // automatic Data Layer path deliberately does not spend quota here.
-            .setExpedited(androidx.work.OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
-            .build()
-
         WorkManager.getInstance(this).enqueueUniqueWork(
             EpisodeDownloadWorker.UNIQUE_WORK_NAME,
             ExistingWorkPolicy.KEEP,
-            request,
+            // Expedited: the watch app is open, so someone is waiting on this. The
+            // automatic Data Layer path deliberately does not spend quota here.
+            EpisodeDownloadWorker.buildRequest(this, expedited = true),
         )
         Log.d(TAG, "Enqueued episode download worker")
     }
@@ -241,18 +236,11 @@ private fun retryEpisodeDownload(context: android.content.Context, episode: Watc
     if (episode.audioUrl.isBlank()) return
     SyncedWatchEpisodes.clearError(episode.guid)
 
-    val constraints = Constraints.Builder()
-        .setRequiredNetworkType(NetworkType.CONNECTED)
-        .build()
-    val request = OneTimeWorkRequestBuilder<EpisodeDownloadWorker>()
-        .setConstraints(constraints)
-        // User-initiated and the user is watching the screen — worth expedited quota.
-        .setExpedited(androidx.work.OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
-        .build()
     WorkManager.getInstance(context).enqueueUniqueWork(
         EpisodeDownloadWorker.UNIQUE_WORK_NAME,
         ExistingWorkPolicy.KEEP,
-        request,
+        // User-initiated and the user is watching the screen — worth expedited quota.
+        EpisodeDownloadWorker.buildRequest(context, expedited = true),
     )
 }
 
@@ -360,6 +348,10 @@ fun EpisodeListScreen(onEpisodeClick: (WatchEpisode) -> Unit) {
     val progressByGuid by PlaybackState.progress.collectAsState()
     val playingGuid by PlaybackState.playingGuid.collectAsState()
     val context = LocalContext.current
+    val wifiOnly by SyncedSettings.wifiOnlyDownloads.collectAsState()
+    // Recomputed whenever the setting changes or the list recomposes. Good enough for a
+    // status hint; the UNMETERED constraint is what actually gates the download.
+    val waitingForWifi = wifiOnly && SyncedSettings.isWaitingForWifi(context)
     // Guid of the episode whose long-press menu is open, if any.
     var menuGuid by remember { mutableStateOf<String?>(null) }
     val menuEpisode = episodes.firstOrNull { it.guid == menuGuid }
@@ -447,6 +439,13 @@ fun EpisodeListScreen(onEpisodeClick: (WatchEpisode) -> Unit) {
                             EpisodeStatusIndicator(
                                 progress = progressByGuid[episode.guid],
                                 isPlaying = episode.guid == playingGuid,
+                            )
+                        } else if (waitingForWifi && episode.downloadProgress == 0 && !episode.error) {
+                            Icon(
+                                imageVector = Icons.Rounded.SignalWifiOff,
+                                contentDescription = "Waiting for Wi-Fi",
+                                tint = Color(0xFFFFB300),
+                                modifier = Modifier.size(18.dp),
                             )
                         } else if (episode.error) {
                             // Distinct from "not downloaded yet" so the long-press retry

@@ -6,6 +6,7 @@ import type { DownloadItem, Episode, PlaybackProgress, Podcast, WatchItem } from
 const SUBSCRIPTIONS_KEY = 'subscriptions';
 const DOWNLOADS_KEY = 'downloads';
 const WATCH_LIST_KEY = 'watchList';
+const WIFI_ONLY_KEY = 'wifiOnlyDownloads';
 
 function episodesKey(podcastId: string) {
   return `episodes:${podcastId}`;
@@ -116,6 +117,21 @@ export function removeFromWatchList(episodeGuid: string): void {
 
 export function isOnWatchList(episodeGuid: string): boolean {
   return getWatchList().some((w) => w.episodeGuid === episodeGuid);
+}
+
+/**
+ * Restrict episode downloads to unmetered networks. Applies to the phone and, via the
+ * Data Layer, to the watch. Defaults to on — podcast episodes are large enough that
+ * silently spending cellular data would be a nasty surprise.
+ */
+export function getWifiOnlyDownloads(): boolean {
+  const raw = Storage.getItemSync(WIFI_ONLY_KEY);
+  if (raw == null) return true;
+  return raw === 'true';
+}
+
+export function setWifiOnlyDownloads(enabled: boolean): void {
+  Storage.setItemSync(WIFI_ONLY_KEY, String(enabled));
 }
 
 function playbackKey(episodeGuid: string) {
