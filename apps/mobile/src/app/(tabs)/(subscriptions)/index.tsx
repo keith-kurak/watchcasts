@@ -17,7 +17,7 @@ import { ThemedView } from '@/components/themed-view';
 import { Colors, NowPlayingBarHeight, Spacing } from '@/constants/theme';
 import { useColorScheme } from 'react-native';
 import { useFocusEffect } from 'expo-router';
-import { fetchFeed } from '@/lib/rss';
+import { fetchFeed, resolveFeedUrl } from '@/lib/rss';
 import {
   addSubscription,
   getSubscriptions,
@@ -42,11 +42,13 @@ export default function SubscriptionsScreen() {
   );
 
   async function handleAddFeed() {
-    const url = feedUrl.trim();
-    if (!url) return;
+    const input = feedUrl.trim();
+    if (!input) return;
 
     setLoading(true);
     try {
+      // Accepts an RSS URL or an Apple Podcasts link.
+      const url = await resolveFeedUrl(input);
       const { podcast, episodes } = await fetchFeed(url);
       addSubscription(podcast);
       setCachedEpisodes(podcast.id, episodes);
@@ -132,7 +134,7 @@ export default function SubscriptionsScreen() {
                   color: colors.text,
                 },
               ]}
-              placeholder="RSS feed URL"
+              placeholder="RSS feed or Apple Podcasts URL"
               placeholderTextColor={colors.textSecondary}
               value={feedUrl}
               onChangeText={setFeedUrl}

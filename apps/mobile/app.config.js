@@ -50,6 +50,7 @@ module.exports = ({ config }) => ({
     "expo-image",
     "expo-status-bar",
     "expo-web-browser",
+    "expo-sharing",
     [
       "expo-splash-screen",
       {
