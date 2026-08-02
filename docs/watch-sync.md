@@ -122,18 +122,42 @@ Three entry points call `SyncedWatchEpisodes.update(json)`:
 | State | Where | Persisted? |
 |---|---|---|
 | Subscription list | `SyncedSubscriptions` | **No** — memory only |
-| Watch episode list | `SyncedWatchEpisodes` | **No** — memory only |
-| Download progress | `SyncedWatchEpisodes` | **No** — memory only |
-| Download error flag | `SyncedWatchEpisodes` | **No** — memory only |
+| Watch episode list | `SharedPreferences("watch-episodes")` via `SyncedWatchEpisodes` | Yes |
+| Download progress | same | Yes, throttled to every 5% |
+| Download error flag | same | Yes |
 | Downloaded audio | `<filesDir>/episodes/<guid>.mp3` | Yes, on disk |
 | Cached artwork | `<filesDir>/episodes/artwork/<hash>.img` | Yes, on disk |
 | Playback position | `SharedPreferences("playback")` via `PlaybackState` | Yes |
 
-`SyncedWatchEpisodes` and `SyncedSubscriptions` are Kotlin `object` singletons holding a `MutableStateFlow`. **Nothing writes them to disk and nothing loads them at startup.**
+Wear OS kills app processes aggressively, and WorkManager will start a fresh process to run
+a worker. **Treat process death as the normal case, not the exception.**
 
-The consequence: after the watch app's process dies, the episode list is empty until a Data Layer event or `MainActivity` repopulates it. Only `localPath` and `artworkPath` can be recovered, because those are re-derived from disk inside `update()`.
+### The load contract
 
-Wear OS kills app processes aggressively. Treat process death as the normal case, not the exception.
+Anything that reads `SyncedWatchEpisodes.episodes` must call `load(context)` first, or it
+will see an empty list in a fresh process and conclude there is nothing to download. Current
+call sites: `EpisodeDownloadWorker.doWork`, both `DataLayerListenerService` message branches,
+`DataLayerListenerService.onDataChanged`, and `MainActivity.onCreate`.
+
+`load()` is idempotent and **first-call-wins** — a later call cannot overwrite a live
+in-memory list with a staler copy from disk. `init(context)` wires up preferences and
+`episodesDir`; `load()` calls it, so callers rarely need it directly.
+
+### Trust-but-verify on restore
+
+A stored `localPath` or `artworkPath` is only adopted if the file still exists. If a record
+claimed a completed download and the file is gone, `downloadProgress` resets to `0` rather
+than keeping its stored `100` — otherwise the phone is told a download finished when it did
+not. A record that was mid-download keeps its stored progress.
+
+### `hasStoredList`
+
+Distinguishes "the watch has nothing queued" from "this process has no idea what is queued".
+Both look like an empty `episodes` list but mean very different things. `EpisodeDownloadWorker`
+uses it to decide between `Result.success()` and `Result.failure()`.
+
+`SyncedSubscriptions` is still memory-only. It feeds a browse UI rather than the download
+pipeline, so losing it is cosmetic.
 
 ---
 
@@ -165,13 +189,16 @@ All four build the request with:
 
 `EpisodeDownloadWorker` is a `CoroutineWorker` running on `Dispatchers.IO`.
 
-1. Ensures `<filesDir>/episodes` exists and sets `SyncedWatchEpisodes.episodesDir`
-2. Calls `downloadArtwork()` — caches every missing artwork image; failures are logged and skipped
-3. Loops: takes the **first** episode where `localPath == null && !error && audioUrl.isNotBlank()`
-4. Sets progress to `1`, reports to the phone
-5. Streams the body to `<guid>.mp3.tmp` in 8 KB chunks
-6. Renames `.tmp` → `.mp3` on completion, then calls `markDownloaded`
-7. Breaks out of the loop when no eligible episode remains, and returns `Result.success()`
+1. Calls `SyncedWatchEpisodes.load()`, then ensures `<filesDir>/episodes` exists
+2. If the list is empty: returns `success()` when `hasStoredList` is true (genuinely nothing
+   queued), or `failure()` when it is false (no persisted state — reporting success here
+   would silently swallow every queued download)
+3. Calls `downloadArtwork()` — caches every missing artwork image; failures are logged and skipped
+4. Loops: takes the **first** episode where `localPath == null && !error && audioUrl.isNotBlank()`
+5. Sets progress to `1`, reports to the phone
+6. Streams the body to `<guid>.mp3.tmp` in 8 KB chunks
+7. Renames `.tmp` → `.mp3` on completion, then calls `markDownloaded`
+8. Breaks out of the loop when no eligible episode remains, and returns `Result.success()`
 
 Ordering is the phone's watch-list order. There is no priority and no parallelism — strictly one file at a time.
 
@@ -210,6 +237,11 @@ Per episode it derives:
 
 It is called after every meaningful state transition: list update, download start, each ~5% step, completion, failure, and on request from the phone.
 
+**It returns early on an empty list.** The phone replaces its whole map with whatever arrives,
+so an empty report wipes its UI. An empty list here means either "nothing queued" — in which
+case the phone already shows nothing — or "state not loaded yet", which must never be
+broadcast as fact.
+
 ### Phone side
 
 `useWatchDownloadStatusListener` in `apps/mobile/src/hooks/useWearDataLayer.ts`:
@@ -220,20 +252,27 @@ It is called after every meaningful state transition: list update, download star
 
 Replace-not-merge means any report the watch sends becomes the phone's entire view of watch download state.
 
-The `/podcatch/request-download-status` handler on the watch sets `episodesDir` and reports. **It does not call `update()`**, so in a fresh process it reports an empty array.
+The `/podcatch/request-download-status` handler on the watch calls `load()` before reporting,
+so a fresh process reports real state rather than nothing.
 
 ---
 
 ## 7. Known issues
 
-Defects present in the code as of 2026-08-02. Each is a real, reproducible cause of user-visible breakage.
+Open defects. Each is a real, reproducible cause of user-visible breakage.
+
+### Fixed
+
+| # | Issue | Fixed in |
+|---|---|---|
+| ~~K1~~ | Watch state memory-only; a worker in a fresh process saw an empty list and returned `success()` without downloading anything | Phase 1 |
+| ~~K2~~ | `request-download-status` reported before syncing, so a fresh process sent `[]` and wiped the phone's display | Phase 1 |
+| ~~K10~~ | `update()` did not carry over `error`, silently re-arming failed episodes on every sync | Phase 1 |
 
 ### Critical — silent data loss
 
 | # | Issue | Effect |
 |---|---|---|
-| K1 | Watch state is memory-only. A worker started in a fresh process sees an empty list, breaks the loop on its first pass, logs "All episodes downloaded", and returns `Result.success()`. | Queued downloads silently never happen. Nothing retries, because success is success. |
-| K2 | The `request-download-status` handler reports before syncing. In a fresh process it sends `[]`, and the phone replaces its whole map with it. | Opening the phone wipes all progress display. |
 | K3 | No `Range` resume. `tmpFile.outputStream()` truncates. | Any interruption restarts the file at byte 0. A slow download can livelock, never finishing. |
 
 ### High — throughput and reliability
@@ -251,7 +290,6 @@ Defects present in the code as of 2026-08-02. Each is a real, reproducible cause
 |---|---|---|
 | K8 | `connection.contentLength` is an `Int` and returns `-1` for chunked or gzipped responses. Progress only updates when `totalBytes > 0`. | Healthy downloads sit at 1% then jump to complete. |
 | K9 | `HttpURLConnection` will not follow HTTP↔HTTPS redirects. Podcast prefix URLs redirect constantly. | The redirect page is written and renamed to `.mp3`. A tiny, broken file looks complete. |
-| K10 | `update()` does not carry over `error`. | Every phone sync silently re-arms failed episodes for another auto-retry. |
 | K11 | `markError` does not reset `downloadProgress`. The watch UI has no error state. | A failed episode shows a stale percentage on the watch and `0` / `error` on the phone. |
 | K12 | `enqueueEpisodeDownload` ignores its `episode` argument. | Tapping an episode does not prioritize it. |
 | K13 | The download loop never checks `isStopped`, and a blocking `read()` is not cancellable. | A stopped worker keeps writing after WorkManager has rescheduled it. |
@@ -274,6 +312,28 @@ duplication).
 ## 8. Change log
 
 Newest first. Add an entry whenever sync behavior changes.
+
+### 2026-08-02 — Phase 1: persist watch state
+
+Fixes **K1**, **K2**, **K10**. See `pr-plan.md` for the full phase plan.
+
+- `SyncedWatchEpisodes` now persists to `SharedPreferences("watch-episodes")`. Added
+  `init`, `load`, and an internal `persist` called from every mutator. Progress writes are
+  throttled to every 5%.
+- Added the load contract: `load(context)` is called by `EpisodeDownloadWorker.doWork`,
+  both `DataLayerListenerService` message branches, `onDataChanged`, and
+  `MainActivity.onCreate`. First call wins, so a stale disk copy cannot clobber live state.
+- `update()` now carries `error` through. Failures are sticky; retry is manual as of Phase 3.
+- `doWork` returns `Result.failure()` — not `success()` — when no persisted list exists.
+- `reportStatus` returns early on an empty list instead of broadcasting `[]`.
+- Restore validates paths on disk. A record claiming a completed file that no longer exists
+  resets to `0%` instead of reporting a phantom `100%`.
+- Mutators use `MutableStateFlow.update {}` rather than read-modify-write on `.value`, so
+  concurrent updates from the worker thread and the UI thread cannot lose each other.
+
+Verified on the Wear emulator against the paired phone emulator: a force-stopped watch app
+reported all 10 episode statuses from a fresh process, and a worker in that fresh process
+downloaded a deleted episode using a list restored entirely from disk.
 
 ### 2026-08-02 — initial document
 

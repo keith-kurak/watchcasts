@@ -24,12 +24,25 @@ class EpisodeDownloadWorker(
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-        val dir = File(applicationContext.filesDir, "episodes")
-        dir.mkdirs()
+        // WorkManager may have started a fresh process to run this worker, in which
+        // case the in-memory episode list is empty. Restore it from disk before
+        // deciding there is nothing to do.
+        SyncedWatchEpisodes.load(applicationContext)
 
-        // Initialize episodesDir so disk checks work
-        SyncedWatchEpisodes.episodesDir = dir
+        val dir = SyncedWatchEpisodes.episodesDir ?: File(applicationContext.filesDir, "episodes")
+        dir.mkdirs()
         SyncedWatchEpisodes.artworkDir?.mkdirs()
+
+        if (SyncedWatchEpisodes.episodes.value.isEmpty()) {
+            return@withContext if (SyncedWatchEpisodes.hasStoredList) {
+                Log.d(TAG, "Nothing queued for the watch")
+                Result.success()
+            } else {
+                // Reporting success here would silently swallow every queued download.
+                Log.w(TAG, "No persisted episode list; waiting for a sync from the phone")
+                Result.failure()
+            }
+        }
 
         // Artwork first — it is small, and the list needs it to render offline.
         downloadArtwork()

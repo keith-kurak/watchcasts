@@ -16,6 +16,15 @@ object WatchDownloadStatusReporter {
 
     fun reportStatus(context: Context) {
         val episodes = SyncedWatchEpisodes.episodes.value
+        // The phone replaces its whole status map with whatever we send, so an empty
+        // report wipes its UI. An empty list here means either "nothing queued" — in
+        // which case the phone already shows nothing — or "state not loaded yet",
+        // which must never be broadcast as fact.
+        if (episodes.isEmpty()) {
+            Log.d(TAG, "No episodes to report; skipping status broadcast")
+            return
+        }
+
         val array = JSONArray()
         for (ep in episodes) {
             val status = when {

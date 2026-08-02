@@ -83,7 +83,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
-        SyncedWatchEpisodes.episodesDir = File(filesDir, "episodes")
+        SyncedWatchEpisodes.load(this)
         SyncedWatchEpisodes.artworkDir?.mkdirs()
         PlaybackState.init(this)
         setContent { PodcatchApp() }

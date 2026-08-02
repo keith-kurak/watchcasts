@@ -11,7 +11,6 @@ import com.google.android.gms.wearable.DataEventBuffer
 import com.google.android.gms.wearable.DataMapItem
 import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.WearableListenerService
-import java.io.File
 
 class DataLayerListenerService : WearableListenerService() {
 
@@ -29,7 +28,9 @@ class DataLayerListenerService : WearableListenerService() {
                 }
                 DataLayerContract.PATH_WATCH_EPISODES -> {
                     Log.d(TAG, "Watch episodes synced (updatedAt=$updatedAt)")
-                    SyncedWatchEpisodes.episodesDir = File(applicationContext.filesDir, "episodes")
+                    // Load first: update() reconciles against existing state, and in a
+                    // fresh process that state only exists on disk.
+                    SyncedWatchEpisodes.load(applicationContext)
                     SyncedWatchEpisodes.update(json)
                     WatchDownloadStatusReporter.reportStatus(applicationContext)
                     enqueueDownloads()
@@ -42,13 +43,15 @@ class DataLayerListenerService : WearableListenerService() {
         when (messageEvent.path) {
             DataLayerContract.PATH_REQUEST_SYNC -> {
                 Log.d(TAG, "Received force-download request from phone")
-                SyncedWatchEpisodes.episodesDir = File(applicationContext.filesDir, "episodes")
+                SyncedWatchEpisodes.load(applicationContext)
                 WatchDownloadStatusReporter.reportStatus(applicationContext)
                 enqueueDownloads()
             }
             DataLayerContract.PATH_REQUEST_DOWNLOAD_STATUS -> {
                 Log.d(TAG, "Received download status request from phone")
-                SyncedWatchEpisodes.episodesDir = File(applicationContext.filesDir, "episodes")
+                // Without this load, a fresh process reports an empty list and the
+                // phone replaces its entire view of watch progress with nothing.
+                SyncedWatchEpisodes.load(applicationContext)
                 WatchDownloadStatusReporter.reportStatus(applicationContext)
             }
         }
