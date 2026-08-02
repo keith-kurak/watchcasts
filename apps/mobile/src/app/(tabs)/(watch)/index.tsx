@@ -1,12 +1,13 @@
 import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
 import { Stack, useRouter } from 'expo-router';
-import { memo, useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { NowPlayingBarHeight, Spacing } from '@/constants/theme';
+import { useScrollToActiveDownload } from '@/hooks/use-scroll-to-active-download';
 import { useTheme } from '@/hooks/use-theme';
 import { formatDate, formatDuration } from '@/lib/format';
 import { useWatchListQuery, useWatchListMutations, type EnrichedDownloadItem } from '@/lib/queries';
@@ -107,6 +108,12 @@ export default function WatchScreen() {
   const [connected, setConnected] = useState<boolean | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
 
+  const listRef = useRef<FlatList<EnrichedDownloadItem>>(null);
+  const hasActiveDownload = watchList.some(
+    (item) => watchStatuses.get(item.episodeGuid)?.status === 'downloading',
+  );
+  useScrollToActiveDownload(listRef, hasActiveDownload);
+
   const checkConnection = useCallback(() => {
     if (Platform.OS !== 'android') {
       setConnected(null);
@@ -170,6 +177,7 @@ export default function WatchScreen() {
         </View>
       )}
       <FlatList
+        ref={listRef}
         data={watchList}
         extraData={watchStatuses}
         keyExtractor={(item) => item.episodeGuid}

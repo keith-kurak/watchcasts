@@ -1,10 +1,12 @@
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
+import { useRef } from 'react';
 import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { NowPlayingBarHeight, Spacing } from '@/constants/theme';
+import { useScrollToActiveDownload } from '@/hooks/use-scroll-to-active-download';
 import { useTheme } from '@/hooks/use-theme';
 import { useDownloadContext } from '@/lib/download-context';
 import { formatDate, formatDuration } from '@/lib/format';
@@ -83,10 +85,20 @@ function DownloadRow({ item }: { item: EnrichedDownloadItem }) {
 export default function DownloadsScreen() {
   const subscriptions = getSubscriptions();
   const { data: downloads = [], isLoading, refetch, isRefetching } = useDownloadsQuery(subscriptions);
+  const { getProgress } = useDownloadContext();
+
+  const listRef = useRef<FlatList<EnrichedDownloadItem>>(null);
+  // `status` alone is not enough: an item is 'downloading' in storage only after the
+  // task starts, while getProgress reflects bytes actually moving.
+  const hasActiveDownload = downloads.some(
+    (d) => d.status === 'downloading' || getProgress(d.episodeGuid) != null,
+  );
+  useScrollToActiveDownload(listRef, hasActiveDownload);
 
   return (
     <ThemedView style={styles.container}>
       <FlatList
+        ref={listRef}
         data={downloads}
         keyExtractor={(item) => item.episodeGuid}
         refreshing={isRefetching}
