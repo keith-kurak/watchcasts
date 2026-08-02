@@ -225,6 +225,9 @@ object SyncedWatchEpisodes {
             if (guid in newGuids) continue
             ep.localPath?.let { File(it).delete() }
             ep.artworkPath?.let { if (it !in keptArtwork) File(it).delete() }
+            // Partial downloads are kept across attempts so they can resume, so a
+            // removed episode has to take its .tmp with it.
+            episodesDir?.let { File(it, "$guid.mp3.tmp").delete() }
             PlaybackState.forget(guid)
             lastPersistedProgress.remove(guid)
         }

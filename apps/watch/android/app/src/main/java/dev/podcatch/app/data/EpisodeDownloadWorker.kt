@@ -3,6 +3,7 @@ package dev.podcatch.app.data
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.content.pm.ServiceInfo
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
@@ -11,12 +12,21 @@ import androidx.work.WorkerParameters
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileOutputStream
+import java.net.HttpURLConnection
 import java.net.URL
 
 /**
  * Downloads undownloaded episodes one at a time, sequentially.
  * Enqueued as unique work ("episode-downloads") with KEEP policy so only
  * one instance runs at a time. Loops until all episodes are downloaded.
+ *
+ * Runs as a long-running worker: [doWork] promotes itself with [setForeground] so it
+ * is not subject to the ~10 minute job execution limit. Without that, a slow download
+ * is killed mid-file and — with no resume — restarts at byte 0 forever.
+ *
+ * Partial downloads live in `<guid>.mp3.tmp` and are resumed with a `Range` header.
+ * Only a fully downloaded file is renamed to `<guid>.mp3`.
  */
 class EpisodeDownloadWorker(
     context: Context,
@@ -24,6 +34,16 @@ class EpisodeDownloadWorker(
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+        // Promote to a foreground service for the life of this worker. Downloads on a
+        // watch routinely outlast the background execution limit.
+        try {
+            setForeground(getForegroundInfo())
+        } catch (e: Exception) {
+            // Not fatal: the work still runs, just at background priority and under the
+            // execution limit. Resume means a truncated attempt is no longer wasted.
+            Log.w(TAG, "Could not promote to foreground; continuing in background", e)
+        }
+
         // WorkManager may have started a fresh process to run this worker, in which
         // case the in-memory episode list is empty. Restore it from disk before
         // deciding there is nothing to do.
@@ -48,49 +68,95 @@ class EpisodeDownloadWorker(
         downloadArtwork()
 
         while (true) {
+            if (isStopped) {
+                Log.d(TAG, "Worker stopped; partial download preserved for resume")
+                return@withContext Result.retry()
+            }
+
             val episode = SyncedWatchEpisodes.episodes.value
                 .firstOrNull { it.localPath == null && !it.error && it.audioUrl.isNotBlank() }
                 ?: break // All done
 
-            Log.d(TAG, "Downloading episode ${episode.guid}")
-            SyncedWatchEpisodes.updateProgress(episode.guid, 1)
-            WatchDownloadStatusReporter.reportStatus(applicationContext)
+            val outFile = File(dir, "${episode.guid}.mp3")
+            val tmpFile = File(dir, "${episode.guid}.mp3.tmp")
             try {
-                val outFile = File(dir, "${episode.guid}.mp3")
-                val tmpFile = File(dir, "${episode.guid}.mp3.tmp")
+                val resumeFrom = if (tmpFile.exists()) tmpFile.length() else 0L
 
-                val connection = URL(episode.audioUrl).openConnection()
-                val totalBytes = connection.contentLength
-                val input = connection.getInputStream()
-                val output = tmpFile.outputStream()
+                val connection = (URL(episode.audioUrl).openConnection() as HttpURLConnection).apply {
+                    // Both default to 0, which means "wait forever". A stalled connection
+                    // would otherwise hang the queue with no error and no retry.
+                    connectTimeout = CONNECT_TIMEOUT_MS
+                    readTimeout = READ_TIMEOUT_MS
+                    if (resumeFrom > 0) setRequestProperty("Range", "bytes=$resumeFrom-")
+                }
 
-                input.use { src ->
-                    output.use { dst ->
+                val status = connection.responseCode
+                if (status != HttpURLConnection.HTTP_OK && status != HttpURLConnection.HTTP_PARTIAL) {
+                    throw IllegalStateException("HTTP $status for ${episode.audioUrl}")
+                }
+
+                // 206 means the server honored the range. 200 means it ignored it and is
+                // sending the whole body, so anything already on disk must be discarded.
+                val resumed = status == HttpURLConnection.HTTP_PARTIAL
+                val startBytes = if (resumed) resumeFrom else 0L
+                if (resumeFrom > 0) {
+                    Log.d(
+                        TAG,
+                        if (resumed) "Resuming ${episode.guid} at $resumeFrom bytes"
+                        else "Server ignored Range for ${episode.guid}; restarting from 0",
+                    )
+                }
+
+                // contentLengthLong covers the >2 GB case that the Int version silently
+                // wraps. It is -1 for chunked or gzipped responses, where no percentage
+                // can be computed at all.
+                val remaining = connection.contentLengthLong
+                val totalBytes = if (remaining > 0) startBytes + remaining else -1L
+
+                Log.d(TAG, "Downloading episode ${episode.guid} (total=$totalBytes)")
+                SyncedWatchEpisodes.updateProgress(
+                    episode.guid,
+                    if (totalBytes > 0) percentOf(startBytes, totalBytes) else INDETERMINATE,
+                )
+                WatchDownloadStatusReporter.reportStatus(applicationContext)
+
+                var stopped = false
+                connection.inputStream.use { src ->
+                    FileOutputStream(tmpFile, resumed).use { dst ->
                         val buffer = ByteArray(8192)
-                        var bytesRead: Long = 0
+                        var bytesRead = startBytes
                         var lastReportedProgress = -1
                         var lastReportedToPhone = -1
 
                         while (true) {
+                            if (isStopped) {
+                                stopped = true
+                                break
+                            }
                             val read = src.read(buffer)
                             if (read == -1) break
                             dst.write(buffer, 0, read)
                             bytesRead += read
 
-                            if (totalBytes > 0) {
-                                val progress = ((bytesRead * 100) / totalBytes).toInt().coerceIn(0, 99)
-                                if (progress != lastReportedProgress) {
-                                    lastReportedProgress = progress
-                                    SyncedWatchEpisodes.updateProgress(episode.guid, progress)
-                                    // Throttle phone reports to every 5%
-                                    if (progress / 5 != lastReportedToPhone / 5) {
-                                        lastReportedToPhone = progress
-                                        WatchDownloadStatusReporter.reportStatus(applicationContext)
-                                    }
-                                }
+                            if (totalBytes <= 0) continue
+                            val progress = percentOf(bytesRead, totalBytes)
+                            if (progress == lastReportedProgress) continue
+                            lastReportedProgress = progress
+                            SyncedWatchEpisodes.updateProgress(episode.guid, progress)
+                            // Throttle phone reports to every 5%
+                            if (progress / 5 != lastReportedToPhone / 5) {
+                                lastReportedToPhone = progress
+                                WatchDownloadStatusReporter.reportStatus(applicationContext)
                             }
                         }
+                        dst.flush()
                     }
+                }
+                connection.disconnect()
+
+                if (stopped) {
+                    Log.d(TAG, "Stopped mid-download; ${tmpFile.length()} bytes kept for resume")
+                    return@withContext Result.retry()
                 }
 
                 // Atomic rename — only a fully downloaded file becomes .mp3
@@ -100,8 +166,8 @@ class EpisodeDownloadWorker(
                 Log.d(TAG, "Downloaded episode ${episode.guid} to ${outFile.absolutePath}")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to download episode ${episode.guid}", e)
-                // Clean up partial download
-                File(dir, "${episode.guid}.mp3.tmp").delete()
+                // The partial file is deliberately kept. A later attempt resumes from it,
+                // and a server that ignores Range makes us discard it anyway.
                 SyncedWatchEpisodes.markError(episode.guid)
                 WatchDownloadStatusReporter.reportStatus(applicationContext)
                 // Retry the whole worker (will pick up where it left off)
@@ -158,12 +224,32 @@ class EpisodeDownloadWorker(
             .setContentTitle("Downloading episodes")
             .setSilent(true)
             .build()
-        return ForegroundInfo(NOTIFICATION_ID, notification)
+        // The type is required from API 34 and must match the manifest declaration on
+        // WorkManager's SystemForegroundService. minSdk is 30, so this always applies.
+        return ForegroundInfo(
+            NOTIFICATION_ID,
+            notification,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+        )
     }
 
     companion object {
         private const val TAG = "EpisodeDownload"
         private const val NOTIFICATION_ID = 1001
         const val UNIQUE_WORK_NAME = "episode-downloads"
+
+        private const val CONNECT_TIMEOUT_MS = 15_000
+        private const val READ_TIMEOUT_MS = 30_000
+
+        /**
+         * Progress value meaning "downloading, total size unknown". Servers using
+         * chunked or gzipped transfer send no Content-Length, and no percentage can be
+         * derived. Reporting 1% forever made healthy downloads look hung.
+         */
+        const val INDETERMINATE = -1
+
+        /** Capped at 99 so only [SyncedWatchEpisodes.markDownloaded] can report 100. */
+        private fun percentOf(bytes: Long, total: Long): Int =
+            ((bytes * 100) / total).toInt().coerceIn(0, 99)
     }
 }

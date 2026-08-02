@@ -30,13 +30,17 @@ object WatchDownloadStatusReporter {
             val status = when {
                 ep.localPath != null -> "complete"
                 ep.error -> "error"
-                ep.downloadProgress > 0 -> "downloading"
+                // Non-zero covers EpisodeDownloadWorker.INDETERMINATE (-1), which means
+                // "downloading, total size unknown".
+                ep.downloadProgress != 0 -> "downloading"
                 else -> "pending"
             }
             val progress = when {
                 ep.localPath != null -> 100
                 ep.error -> 0
-                else -> ep.downloadProgress
+                // The phone renders a percentage only when this is > 0, so an
+                // indeterminate download shows as "Downloading…" with no number.
+                else -> ep.downloadProgress.coerceAtLeast(0)
             }
             array.put(JSONObject().apply {
                 put("guid", ep.guid)

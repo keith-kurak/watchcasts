@@ -33,7 +33,9 @@ class DataLayerListenerService : WearableListenerService() {
                     SyncedWatchEpisodes.load(applicationContext)
                     SyncedWatchEpisodes.update(json)
                     WatchDownloadStatusReporter.reportStatus(applicationContext)
-                    enqueueDownloads()
+                    // Automatic and frequent — every watch-list change on the phone
+                    // lands here. Not worth expedited quota.
+                    enqueueDownloads(expedited = false)
                 }
             }
         }
@@ -45,7 +47,8 @@ class DataLayerListenerService : WearableListenerService() {
                 Log.d(TAG, "Received force-download request from phone")
                 SyncedWatchEpisodes.load(applicationContext)
                 WatchDownloadStatusReporter.reportStatus(applicationContext)
-                enqueueDownloads()
+                // Someone pressed sync on the phone and is watching for a result.
+                enqueueDownloads(expedited = true)
             }
             DataLayerContract.PATH_REQUEST_DOWNLOAD_STATUS -> {
                 Log.d(TAG, "Received download status request from phone")
@@ -57,7 +60,12 @@ class DataLayerListenerService : WearableListenerService() {
         }
     }
 
-    private fun enqueueDownloads() {
+    /**
+     * @param expedited ask the system to start the work now. Expedited quota is finite
+     * and per-app, so it is reserved for triggers where a person is waiting. Spending it
+     * on every automatic list sync is what leaves none for a deliberate request.
+     */
+    private fun enqueueDownloads(expedited: Boolean) {
         val hasUndownloaded = SyncedWatchEpisodes.episodes.value
             .any { it.localPath == null && it.audioUrl.isNotBlank() }
         if (!hasUndownloaded) return
@@ -68,7 +76,11 @@ class DataLayerListenerService : WearableListenerService() {
 
         val request = OneTimeWorkRequestBuilder<EpisodeDownloadWorker>()
             .setConstraints(constraints)
-            .setExpedited(androidx.work.OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+            .apply {
+                if (expedited) {
+                    setExpedited(androidx.work.OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+                }
+            }
             .build()
 
         WorkManager.getInstance(applicationContext).enqueueUniqueWork(
@@ -76,7 +88,7 @@ class DataLayerListenerService : WearableListenerService() {
             ExistingWorkPolicy.KEEP,
             request,
         )
-        Log.d(TAG, "Enqueued episode download worker")
+        Log.d(TAG, "Enqueued episode download worker (expedited=$expedited)")
     }
 
     companion object {

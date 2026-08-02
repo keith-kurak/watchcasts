@@ -174,12 +174,18 @@ Four call sites enqueue the worker. All use the unique work name `episode-downlo
 | `MainActivity.enqueueDownloads` | Activity resumed, or live data change |
 | `enqueueEpisodeDownload` (`MainActivity.kt`) | User tapped a non-downloaded episode |
 
-All four build the request with:
+All four set `NetworkType.CONNECTED`. They differ in whether they ask for expedited work.
 
-```kotlin
-.setConstraints(NetworkType.CONNECTED)
-.setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
-```
+Expedited quota is finite and per-app, so it is **reserved for triggers where a person is
+waiting.** Spending it on every automatic list sync is what left none for a deliberate
+request — the original cause of "it works for the first few, then stops".
+
+| Trigger | Expedited? |
+|---|---|
+| `onDataChanged` — phone pushed a list | No — automatic and frequent |
+| `request-sync` — force-download from the phone | Yes |
+| `MainActivity` — watch app opened | Yes |
+| Episode tap | Yes |
 
 `KEEP` means an enqueue is **discarded** if work with that name already exists in any non-terminal state — including `ENQUEUED` while waiting out retry backoff.
 
@@ -195,21 +201,58 @@ All four build the request with:
    would silently swallow every queued download)
 3. Calls `downloadArtwork()` — caches every missing artwork image; failures are logged and skipped
 4. Loops: takes the **first** episode where `localPath == null && !error && audioUrl.isNotBlank()`
-5. Sets progress to `1`, reports to the phone
+5. Resumes from `<guid>.mp3.tmp` if one exists (see below), else starts fresh
 6. Streams the body to `<guid>.mp3.tmp` in 8 KB chunks
 7. Renames `.tmp` → `.mp3` on completion, then calls `markDownloaded`
 8. Breaks out of the loop when no eligible episode remains, and returns `Result.success()`
 
 Ordering is the phone's watch-list order. There is no priority and no parallelism — strictly one file at a time.
 
-`getForegroundInfo()` is defined and builds a silent `IMPORTANCE_LOW` notification on channel `episode_downloads`. **The worker never calls `setForeground()`**, so this is only used when WorkManager runs the work as expedited on API < 31.
+### Long-running worker
+
+`doWork` calls `setForeground(getForegroundInfo())` before doing anything else. This promotes
+the worker to a foreground service for its whole run, so it is not subject to the ~10 minute
+job execution limit. Without it, a slow download is killed mid-file — and before resume
+existed, that meant restarting at byte 0 forever.
+
+Requirements, all of which must agree:
+
+- `FOREGROUND_SERVICE_DATA_SYNC` permission in the manifest
+- `androidx.work.impl.foreground.SystemForegroundService` declared with
+  `android:foregroundServiceType="dataSync"` via `tools:node="merge"`
+- `ForegroundInfo` built with `ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC`
+
+Promotion failure is caught and logged, not fatal. The work still runs at background
+priority, and resume means a truncated attempt is no longer wasted.
+
+On Android 15 a `dataSync` service is capped at 6 cumulative hours per 24. WorkManager 2.10.0
+handles that timeout internally.
+
+### Resume
+
+Partial downloads persist in `<guid>.mp3.tmp` across attempts, including failures.
+
+- If a `.tmp` exists, the request carries `Range: bytes=<size>-`
+- `206 Partial Content` → append to the existing file, seeding the byte counter
+- `200 OK` → the server ignored the range, so truncate and start over
+- Anything else → throw, so the episode is marked failed
+
+`update()` deletes the `.tmp` when an episode leaves the watch list, since partials otherwise
+outlive their episode.
 
 ### Progress reporting
 
 - **Watch-local** — every whole-percent change calls `updateProgress`
 - **To the phone** — throttled to roughly every 5%
 
-Progress is only computed inside `if (totalBytes > 0)`, where `totalBytes` comes from `connection.contentLength`.
+Total size comes from `getContentLengthLong()` plus any resumed offset. The `Long` variant
+matters because the `Int` one silently wraps above 2 GB.
+
+When the server sends no `Content-Length` — chunked or gzipped responses — no percentage can
+be derived. Progress is then set to `EpisodeDownloadWorker.INDETERMINATE` (`-1`), which the
+reporter maps to status `downloading` with progress `0`. The phone renders a percentage only
+when progress is `> 0`, so such a download reads as "Downloading…" with no number, and the
+watch shows `…`. Previously it froze at 1% for the entire transfer.
 
 ### Failure handling
 
@@ -268,31 +311,28 @@ Open defects. Each is a real, reproducible cause of user-visible breakage.
 | ~~K1~~ | Watch state memory-only; a worker in a fresh process saw an empty list and returned `success()` without downloading anything | Phase 1 |
 | ~~K2~~ | `request-download-status` reported before syncing, so a fresh process sent `[]` and wiped the phone's display | Phase 1 |
 | ~~K10~~ | `update()` did not carry over `error`, silently re-arming failed episodes on every sync | Phase 1 |
-
-### Critical — silent data loss
-
-| # | Issue | Effect |
-|---|---|---|
-| K3 | No `Range` resume. `tmpFile.outputStream()` truncates. | Any interruption restarts the file at byte 0. A slow download can livelock, never finishing. |
+| ~~K3~~ | No `Range` resume; any interruption restarted the file at byte 0 | Phase 2 |
+| ~~K4~~ | No `connectTimeout` or `readTimeout`, so a stalled connection hung forever | Phase 2 |
+| ~~K5~~ | Expedited quota spent on automatic syncs, leaving none for user-initiated requests | Phase 2 |
+| ~~K7~~ | `setForeground()` never called, so downloads were cut off by the execution limit | Phase 2 |
+| ~~K8~~ | Progress depended on the `Int` `contentLength`, freezing at 1% when absent | Phase 2 |
+| ~~K13~~ | The download loop never checked `isStopped` | Phase 2 |
 
 ### High — throughput and reliability
 
 | # | Issue | Effect |
 |---|---|---|
-| K4 | No `connectTimeout` or `readTimeout`. Both default to 0 = infinite. | A stalled connection hangs forever with no error and no retry. Progress sits at exactly 1%. |
-| K5 | `setExpedited` with `RUN_AS_NON_EXPEDITED_WORK_REQUEST`. Expedited quota is per-app and finite. | Works for the first few downloads, then silently degrades to a deferred, throttled background job. |
 | K6 | `KEEP` plus exponential retry backoff. | New download requests are silently dropped for up to 5 h. The "Downloading…" toast claims otherwise. |
-| K7 | `setForeground()` is never called, so the worker is subject to the ~10-minute job execution limit. | Slow downloads are cut off mid-file and restart from 0 (compounds K3). |
 
 ### Medium — correctness and UX
 
 | # | Issue | Effect |
 |---|---|---|
-| K8 | `connection.contentLength` is an `Int` and returns `-1` for chunked or gzipped responses. Progress only updates when `totalBytes > 0`. | Healthy downloads sit at 1% then jump to complete. |
 | K9 | `HttpURLConnection` will not follow HTTP↔HTTPS redirects. Podcast prefix URLs redirect constantly. | The redirect page is written and renamed to `.mp3`. A tiny, broken file looks complete. |
 | K11 | `markError` does not reset `downloadProgress`. The watch UI has no error state. | A failed episode shows a stale percentage on the watch and `0` / `error` on the phone. |
 | K12 | `enqueueEpisodeDownload` ignores its `episode` argument. | Tapping an episode does not prioritize it. |
-| K13 | The download loop never checks `isStopped`, and a blocking `read()` is not cancellable. | A stopped worker keeps writing after WorkManager has rescheduled it. |
+
+K6, K11, and K12 are Phase 3. K9 is deferred as T2.
 
 ### Documentation drift
 
@@ -312,6 +352,38 @@ duplication).
 ## 8. Change log
 
 Newest first. Add an entry whenever sync behavior changes.
+
+### 2026-08-02 — Phase 2: download robustness
+
+Fixes **K3**, **K4**, **K5**, **K7**, **K8**, **K13**. See `pr-plan.md`.
+
+- `connectTimeout = 15s`, `readTimeout = 30s`. Both previously defaulted to 0 = infinite.
+- `Range`-based resume. Partial `.tmp` files now persist across attempts, including
+  failures. A `206` appends; a `200` means the server ignored the range, so the partial is
+  discarded and the download restarts. `update()` deletes the `.tmp` when an episode leaves
+  the watch list.
+- `setForeground()` at the top of `doWork`, with `FOREGROUND_SERVICE_DATA_SYNC` and a
+  `dataSync` type on WorkManager's `SystemForegroundService`. Removes the ~10 minute
+  execution limit. Promotion failure is logged, not fatal.
+- Progress uses `getContentLengthLong()` plus the resumed offset. When the server sends no
+  `Content-Length`, progress is `INDETERMINATE` (`-1`) and the UI shows activity without a
+  number instead of freezing at 1%.
+- Expedited work reallocated: automatic Data Layer syncs no longer spend quota; the phone's
+  force-download, opening the watch app, and episode taps still do.
+- `isStopped` is checked per loop pass and per read. A stopped worker returns `retry()` and
+  keeps its partial file.
+- Non-2xx responses now throw instead of being written to disk as if they were audio.
+
+Verified on the Wear emulator: killed a download at 37,644,971 / 108,552,377 bytes and the
+next attempt logged `Resuming ... at 37644971 bytes`, finishing to a byte-exact file with a
+valid ID3 header. `dumpsys` confirmed `isForeground=true types=0x1` during the run. Log
+confirmed `expedited=true` for the phone's sync button and `expedited=false` for the
+automatic list sync.
+
+Not exercised end to end: the `INDETERMINATE` path. A synthetic chunked-encoding episode
+cannot survive on the watch, because every trigger resyncs the list from the phone and drops
+it. The reachable half of that change was verified — pending episodes still report `pending`,
+not `downloading`, under the reporter's new `!= 0` test.
 
 ### 2026-08-02 — Phase 1: persist watch state
 

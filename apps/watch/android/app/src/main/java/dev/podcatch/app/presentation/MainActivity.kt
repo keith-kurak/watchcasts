@@ -154,6 +154,8 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
 
         val request = OneTimeWorkRequestBuilder<EpisodeDownloadWorker>()
             .setConstraints(constraints)
+            // Expedited: the watch app is open, so someone is waiting on this. The
+            // automatic Data Layer path deliberately does not spend quota here.
             .setExpedited(androidx.work.OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             .build()
 
@@ -357,9 +359,15 @@ fun EpisodeListScreen(onEpisodeClick: (WatchEpisode) -> Unit) {
                                 progress = progressByGuid[episode.guid],
                                 isPlaying = episode.guid == playingGuid,
                             )
-                        } else if (episode.downloadProgress > 0) {
+                        } else if (episode.downloadProgress != 0) {
                             Text(
-                                text = "${episode.downloadProgress}%",
+                                // Negative means the server sent no Content-Length, so
+                                // there is no percentage to show — only "in progress".
+                                text = if (episode.downloadProgress > 0) {
+                                    "${episode.downloadProgress}%"
+                                } else {
+                                    "…"
+                                },
                                 style = MaterialTheme.typography.caption3,
                             )
                         } else {
