@@ -172,7 +172,7 @@ Four call sites enqueue the worker. All use the unique work name `episode-downlo
 | `DataLayerListenerService.onDataChanged` | New watch-episode list arrived |
 | `DataLayerListenerService.onMessageReceived` | `/podcatch/request-sync` from the phone |
 | `MainActivity.enqueueDownloads` | Activity resumed, or live data change |
-| `enqueueEpisodeDownload` (`MainActivity.kt`) | User tapped a non-downloaded episode |
+| `retryEpisodeDownload` (`MainActivity.kt`) | User chose Retry from the long-press menu |
 
 All four set `NetworkType.CONNECTED`. They differ in whether they ask for expedited work.
 
@@ -185,11 +185,12 @@ request — the original cause of "it works for the first few, then stops".
 | `onDataChanged` — phone pushed a list | No — automatic and frequent |
 | `request-sync` — force-download from the phone | Yes |
 | `MainActivity` — watch app opened | Yes |
-| Episode tap | Yes |
+| Long-press retry | Yes |
 
-`KEEP` means an enqueue is **discarded** if work with that name already exists in any non-terminal state — including `ENQUEUED` while waiting out retry backoff.
-
-`enqueueEpisodeDownload` takes an `episode` parameter but only uses it to check that `audioUrl` is non-blank. **The tapped episode is not passed to the worker and is not prioritized.**
+`KEEP` means an enqueue is **discarded** if work with that name already exists in any
+non-terminal state. That is safe now that auto-retry and its backoff are gone: a running
+worker re-reads the episode list on every loop pass, so clearing an `error` flag makes that
+episode eligible without needing to replace the work.
 
 ### The worker
 
@@ -254,16 +255,41 @@ reporter maps to status `downloading` with progress `0`. The phone renders a per
 when progress is `> 0`, so such a download reads as "Downloading…" with no number, and the
 watch shows `…`. Previously it froze at 1% for the entire transfer.
 
-### Failure handling
+### Failure handling — manual retry only
 
 Any exception in the download loop:
 
-1. Deletes the partial `.tmp`
-2. Calls `markError(guid)`
-3. Reports status to the phone
-4. Returns `Result.retry()` — immediately, without attempting later episodes
+1. Calls `markError(guid)`, which also resets `downloadProgress` to `0`
+2. Reports status to the phone
+3. **Continues to the next episode.** The worker still finishes with `success()`
 
-`Result.retry()` uses WorkManager's default backoff: exponential, starting at 30 s, capped at 5 h. The `error` flag makes the worker skip that episode on subsequent attempts — until the next `update()` clears it.
+The partial `.tmp` is deliberately kept so a later attempt can resume from it.
+
+There is **no auto-retry**. A failure is sticky: `error` persists to disk and survives phone
+syncs, so the worker skips that episode until a person clears it.
+
+This replaced a `Result.retry()` that backed off exponentially toward a 5 hour cap while
+`KEEP` silently discarded every new download request in the meantime.
+
+**Known trade-off:** losing network mid-queue fails every remaining episode, each needing a
+manual retry. The `NetworkType.CONNECTED` constraint prevents the worker *starting* without
+network, but not losing it mid-run. If this becomes annoying, treat the `IOException`
+subtypes that mean "network went away" as retryable and everything else as a hard error.
+
+### Retrying
+
+Downloading is automatic. The only manual download action is retrying a failure.
+
+- A failed episode shows a red error icon in the watch list
+- **Long-press** it to open a menu with **Retry download** and **Cancel**
+- Retry calls `SyncedWatchEpisodes.clearError(guid)`, persists, then enqueues the worker
+
+Tapping a non-downloaded episode does nothing. It used to enqueue a download and show a
+"Downloading…" toast that lied whenever `KEEP` discarded the request.
+
+Wear Compose Material 1.4 has no `Card(onLongClick)`, so the gestures live in a
+`combinedClickable` on the `Row` inside the card. A child clickable wins over the Card's own,
+which is why `Card(onClick = {})` is a deliberate no-op.
 
 ---
 
@@ -317,22 +343,17 @@ Open defects. Each is a real, reproducible cause of user-visible breakage.
 | ~~K7~~ | `setForeground()` never called, so downloads were cut off by the execution limit | Phase 2 |
 | ~~K8~~ | Progress depended on the `Int` `contentLength`, freezing at 1% when absent | Phase 2 |
 | ~~K13~~ | The download loop never checked `isStopped` | Phase 2 |
+| ~~K6~~ | `KEEP` plus exponential retry backoff silently dropped requests for up to 5 h | Phase 3 |
+| ~~K11~~ | `markError` left a stale percentage and the watch had no error state | Phase 3 |
+| ~~K12~~ | Tapping an episode enqueued a download it could not prioritize, behind a toast that lied | Phase 3 |
 
-### High — throughput and reliability
-
-| # | Issue | Effect |
-|---|---|---|
-| K6 | `KEEP` plus exponential retry backoff. | New download requests are silently dropped for up to 5 h. The "Downloading…" toast claims otherwise. |
-
-### Medium — correctness and UX
+### Medium — correctness
 
 | # | Issue | Effect |
 |---|---|---|
 | K9 | `HttpURLConnection` will not follow HTTP↔HTTPS redirects. Podcast prefix URLs redirect constantly. | The redirect page is written and renamed to `.mp3`. A tiny, broken file looks complete. |
-| K11 | `markError` does not reset `downloadProgress`. The watch UI has no error state. | A failed episode shows a stale percentage on the watch and `0` / `error` on the phone. |
-| K12 | `enqueueEpisodeDownload` ignores its `episode` argument. | Tapping an episode does not prioritize it. |
 
-K6, K11, and K12 are Phase 3. K9 is deferred as T2.
+K9 is deferred as T2, and disappears if T1 (OkHttp) lands first.
 
 ### Documentation drift
 
@@ -352,6 +373,26 @@ duplication).
 ## 8. Change log
 
 Newest first. Add an entry whenever sync behavior changes.
+
+### 2026-08-02 — Phase 3: manual retry only
+
+Fixes **K6**, **K11**, **K12**. See `pr-plan.md`.
+
+- No auto-retry. A download failure marks the episode and the queue moves on; the worker
+  still finishes with `success()`. Removes the exponential backoff that `KEEP` turned into
+  silently-dropped requests.
+- `markError` resets `downloadProgress` to `0`, and added `clearError` for manual retry.
+- Failed episodes show a red error icon in the watch list, distinct from "not downloaded
+  yet", so the retry affordance is discoverable.
+- **Long-press** a non-downloaded episode for a menu with **Retry download** / **Cancel**.
+  Implemented with `combinedClickable` on the `Row` inside the card — Wear Compose Material
+  1.4 has no `Card(onLongClick)`, and a child clickable wins over the Card's own.
+- Removed tap-to-download and its "Downloading…" toast. `enqueueEpisodeDownload` is gone,
+  replaced by `retryEpisodeDownload`.
+
+Verified on the Wear emulator: a seeded failure survived a phone sync and the worker skipped
+it; long-press opened the menu; Retry cleared the flag and the episode downloaded to a
+byte-exact file; a plain tap on a failed episode started nothing.
 
 ### 2026-08-02 — Phase 2: download robustness
 

@@ -166,12 +166,15 @@ class EpisodeDownloadWorker(
                 Log.d(TAG, "Downloaded episode ${episode.guid} to ${outFile.absolutePath}")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to download episode ${episode.guid}", e)
-                // The partial file is deliberately kept. A later attempt resumes from it,
+                // The partial file is deliberately kept. A manual retry resumes from it,
                 // and a server that ignores Range makes us discard it anyway.
+                //
+                // No auto-retry: the episode is marked failed and the queue moves on. A
+                // retrying worker used to back off exponentially toward a 5 hour cap
+                // while KEEP silently discarded every new request in the meantime.
+                // Retry is now an explicit user action — long-press the episode.
                 SyncedWatchEpisodes.markError(episode.guid)
                 WatchDownloadStatusReporter.reportStatus(applicationContext)
-                // Retry the whole worker (will pick up where it left off)
-                return@withContext Result.retry()
             }
         }
 

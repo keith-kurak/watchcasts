@@ -271,9 +271,19 @@ object SyncedWatchEpisodes {
 
     fun markError(guid: String) {
         _episodes.update { list ->
-            list.map { if (it.guid == guid) it.copy(error = true) else it }
+            // Progress resets so the row reads as failed rather than stuck at a
+            // percentage it will never move past.
+            list.map { if (it.guid == guid) it.copy(error = true, downloadProgress = 0) else it }
         }
         lastPersistedProgress.remove(guid)
+        persist()
+    }
+
+    /** Clear a failure so the worker will pick this episode up again. Manual retry only. */
+    fun clearError(guid: String) {
+        _episodes.update { list ->
+            list.map { if (it.guid == guid) it.copy(error = false) else it }
+        }
         persist()
     }
 }
