@@ -52,6 +52,8 @@ import androidx.wear.compose.navigation.composable
 import androidx.wear.compose.navigation.rememberSwipeDismissableNavController
 import com.google.android.horologist.annotations.ExperimentalHorologistApi
 import com.google.android.horologist.audio.ui.VolumeScreen
+import com.google.android.horologist.compose.ambient.AmbientAware
+import com.google.android.horologist.compose.ambient.AmbientState
 import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
@@ -190,43 +192,49 @@ private fun enqueueEpisodeDownload(context: android.content.Context, episode: Wa
 fun PodcatchApp() {
     PodcatchTheme {
         val navController = rememberSwipeDismissableNavController()
-        Scaffold(timeText = { TimeText() }) {
-            SwipeDismissableNavHost(
-                navController = navController,
-                startDestination = "episodeList",
-            ) {
-                composable("episodeList") {
-                    EpisodeListScreen(
-                        onEpisodeClick = { episode ->
-                            navController.navigate(
-                                "player/${Uri.encode(episode.guid)}",
-                            )
-                        },
-                    )
-                }
-                composable("player/{guid}") { backStackEntry ->
-                    val guid = backStackEntry.arguments?.getString("guid") ?: return@composable
-                    EpisodePlayerScreen(
-                        guid = Uri.decode(guid),
-                        onVolumeClick = { navController.navigate("volume") },
-                        onSpeedClick = { navController.navigate("speed") },
-                    )
-                }
-                composable("volume") {
-                    VolumeScreen()
-                }
-                composable("speed") {
-                    val playerEntry = remember(navController) {
-                        navController.getBackStackEntry("player/{guid}")
+        // Enables always-on, so the display dims into ambient with the app still
+        // shown, instead of the system covering it with a screenshot and the time.
+        AmbientAware { ambientState ->
+            val isAmbient = ambientState is AmbientState.Ambient
+            Scaffold(timeText = { if (!isAmbient) TimeText() }) {
+                SwipeDismissableNavHost(
+                    navController = navController,
+                    startDestination = "episodeList",
+                ) {
+                    composable("episodeList") {
+                        EpisodeListScreen(
+                            onEpisodeClick = { episode ->
+                                navController.navigate(
+                                    "player/${Uri.encode(episode.guid)}",
+                                )
+                            },
+                        )
                     }
-                    val playerViewModel: EpisodePlayerViewModel = viewModel(
-                        viewModelStoreOwner = playerEntry,
-                    )
-                    SpeedScreen(
-                        currentSpeed = playerViewModel.currentSpeed,
-                        onSpeedSelected = { speed -> playerViewModel.setSpeed(speed) },
-                        onBack = { navController.popBackStack() },
-                    )
+                    composable("player/{guid}") { backStackEntry ->
+                        val guid = backStackEntry.arguments?.getString("guid")
+                            ?: return@composable
+                        EpisodePlayerScreen(
+                            guid = Uri.decode(guid),
+                            onVolumeClick = { navController.navigate("volume") },
+                            onSpeedClick = { navController.navigate("speed") },
+                        )
+                    }
+                    composable("volume") {
+                        VolumeScreen()
+                    }
+                    composable("speed") {
+                        val playerEntry = remember(navController) {
+                            navController.getBackStackEntry("player/{guid}")
+                        }
+                        val playerViewModel: EpisodePlayerViewModel = viewModel(
+                            viewModelStoreOwner = playerEntry,
+                        )
+                        SpeedScreen(
+                            currentSpeed = playerViewModel.currentSpeed,
+                            onSpeedSelected = { speed -> playerViewModel.setSpeed(speed) },
+                            onBack = { navController.popBackStack() },
+                        )
+                    }
                 }
             }
         }

@@ -92,6 +92,7 @@ dependencies {
     implementation(libs.horologist.media.data)
     implementation(libs.horologist.audio.ui)
     implementation(libs.horologist.media)
+    implementation(libs.horologist.compose.layout)
 
     // Media3 ExoPlayer for local audio playback
     implementation(libs.media3.exoplayer)
