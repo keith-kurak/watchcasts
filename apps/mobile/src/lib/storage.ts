@@ -7,6 +7,35 @@ const SUBSCRIPTIONS_KEY = 'subscriptions';
 const DOWNLOADS_KEY = 'downloads';
 const WATCH_LIST_KEY = 'watchList';
 const WIFI_ONLY_KEY = 'wifiOnlyDownloads';
+const PLAY_NEXT_KEY = 'playNextEpisode';
+const SYNC_DOWNLOADS_KEY = 'syncDownloads';
+
+/**
+ * Most episodes either device will hold.
+ *
+ * This is a usability limit before it is a storage one. Both lists are hand-ordered by
+ * dragging, and dragging a row across hundreds of items is unusable no matter how fast
+ * the list renders. Thirty also keeps the watch's sequential downloader from queueing
+ * more than it can realistically finish.
+ */
+export const MAX_DOWNLOADS = 30;
+
+/** Outcome of an add that may be rejected. Callers surface 'full' to the user. */
+export type AddResult = 'added' | 'duplicate' | 'full';
+
+/**
+ * Move one item within a list, shifting everything between the two positions.
+ *
+ * Insert-and-shift, not swap: "play this third" has to leave the relative order of
+ * everything else intact, which a swap does not.
+ */
+function moveItem<T>(items: T[], from: number, to: number): T[] {
+  if (from === to || from < 0 || from >= items.length) return items;
+  const next = items.slice();
+  const [moved] = next.splice(from, 1);
+  next.splice(Math.max(0, Math.min(to, next.length)), 0, moved);
+  return next;
+}
 
 function episodesKey(podcastId: string) {
   return `episodes:${podcastId}`;
@@ -56,11 +85,25 @@ export function getDownloads(): DownloadItem[] {
   return JSON.parse(raw) as DownloadItem[];
 }
 
-export function addToDownloads(podcastId: string, episodeGuid: string): void {
+export function setDownloads(items: DownloadItem[]): void {
+  Storage.setItemSync(DOWNLOADS_KEY, JSON.stringify(items));
+}
+
+export function addToDownloads(podcastId: string, episodeGuid: string): AddResult {
   const downloads = getDownloads();
-  if (downloads.some((d) => d.episodeGuid === episodeGuid)) return;
+  if (downloads.some((d) => d.episodeGuid === episodeGuid)) return 'duplicate';
+  if (downloads.length >= MAX_DOWNLOADS) return 'full';
   downloads.push({ podcastId, episodeGuid, status: 'pending' });
-  Storage.setItemSync(DOWNLOADS_KEY, JSON.stringify(downloads));
+  setDownloads(downloads);
+  return 'added';
+}
+
+/** Move a phone download to a new position. Order is playback and download order. */
+export function moveDownload(episodeGuid: string, toIndex: number): void {
+  const items = getDownloads();
+  const from = items.findIndex((d) => d.episodeGuid === episodeGuid);
+  if (from === -1) return;
+  setDownloads(moveItem(items, from, toIndex));
 }
 
 export function updateDownloadItem(
@@ -71,7 +114,7 @@ export function updateDownloadItem(
   const idx = downloads.findIndex((d) => d.episodeGuid === episodeGuid);
   if (idx === -1) return;
   downloads[idx] = { ...downloads[idx], ...updates };
-  Storage.setItemSync(DOWNLOADS_KEY, JSON.stringify(downloads));
+  setDownloads(downloads);
 }
 
 export function removeFromDownloads(episodeGuid: string): void {
@@ -85,8 +128,7 @@ export function removeFromDownloads(episodeGuid: string): void {
       // file may already be gone
     }
   }
-  const filtered = downloads.filter((d) => d.episodeGuid !== episodeGuid);
-  Storage.setItemSync(DOWNLOADS_KEY, JSON.stringify(filtered));
+  setDownloads(downloads.filter((d) => d.episodeGuid !== episodeGuid));
 }
 
 export function isInDownloads(episodeGuid: string): boolean {
@@ -103,16 +145,34 @@ export function getWatchList(): WatchItem[] {
   return JSON.parse(raw) as WatchItem[];
 }
 
-export function addToWatchList(podcastId: string, episodeGuid: string): void {
+export function setWatchList(items: WatchItem[]): void {
+  Storage.setItemSync(WATCH_LIST_KEY, JSON.stringify(items));
+}
+
+export function addToWatchList(podcastId: string, episodeGuid: string): AddResult {
   const list = getWatchList();
-  if (list.some((w) => w.episodeGuid === episodeGuid)) return;
+  if (list.some((w) => w.episodeGuid === episodeGuid)) return 'duplicate';
+  if (list.length >= MAX_DOWNLOADS) return 'full';
   list.push({ podcastId, episodeGuid });
-  Storage.setItemSync(WATCH_LIST_KEY, JSON.stringify(list));
+  setWatchList(list);
+  return 'added';
 }
 
 export function removeFromWatchList(episodeGuid: string): void {
-  const list = getWatchList().filter((w) => w.episodeGuid !== episodeGuid);
-  Storage.setItemSync(WATCH_LIST_KEY, JSON.stringify(list));
+  setWatchList(getWatchList().filter((w) => w.episodeGuid !== episodeGuid));
+}
+
+/**
+ * Move a watch episode to a new position.
+ *
+ * The watch downloads the first not-yet-downloaded episode in this list, so position is
+ * download priority as well as playback order.
+ */
+export function moveWatchItem(episodeGuid: string, toIndex: number): void {
+  const items = getWatchList();
+  const from = items.findIndex((w) => w.episodeGuid === episodeGuid);
+  if (from === -1) return;
+  setWatchList(moveItem(items, from, toIndex));
 }
 
 export function isOnWatchList(episodeGuid: string): boolean {
@@ -132,6 +192,72 @@ export function getWifiOnlyDownloads(): boolean {
 
 export function setWifiOnlyDownloads(enabled: boolean): void {
   Storage.setItemSync(WIFI_ONLY_KEY, String(enabled));
+}
+
+/**
+ * When an episode finishes, start the next one in the same list. Honoured by this phone
+ * and, via the Data Layer, by the watch. Defaults to on — a hand-ordered queue that
+ * stops after one episode is not much of a queue.
+ */
+export function getPlayNextEpisode(): boolean {
+  const raw = Storage.getItemSync(PLAY_NEXT_KEY);
+  if (raw == null) return true;
+  return raw === 'true';
+}
+
+export function setPlayNextEpisode(enabled: boolean): void {
+  Storage.setItemSync(PLAY_NEXT_KEY, String(enabled));
+}
+
+/**
+ * Keep the phone's downloads and the watch's queue identical — same episodes, same
+ * order. Defaults to off, because it makes every watch download also spend phone
+ * storage, which should be an explicit choice.
+ */
+export function getSyncDownloads(): boolean {
+  return Storage.getItemSync(SYNC_DOWNLOADS_KEY) === 'true';
+}
+
+export function setSyncDownloads(enabled: boolean): void {
+  Storage.setItemSync(SYNC_DOWNLOADS_KEY, String(enabled));
+}
+
+/**
+ * Make the phone hold exactly what the watch holds, in the watch's order.
+ *
+ * The watch is the source of truth when sync is switched on: it is the device with the
+ * hard storage limit, and its queue is the one the user curates. Anything on the phone
+ * that is not on the watch is deleted, files and all.
+ *
+ * Returns counts so the caller can report what happened. New entries land as 'pending';
+ * the caller drains them so the downloads actually start.
+ */
+export function mirrorWatchListToDownloads(): { removed: number; added: number } {
+  const watch = getWatchList();
+  const watchGuids = new Set(watch.map((w) => w.episodeGuid));
+
+  let removed = 0;
+  for (const item of getDownloads()) {
+    if (!watchGuids.has(item.episodeGuid)) {
+      // Deletes the audio file as well as the list entry.
+      removeFromDownloads(item.episodeGuid);
+      removed++;
+    }
+  }
+
+  // Rebuild in the watch's order, preserving the download state of anything the phone
+  // already has so a completed episode is not re-downloaded.
+  const kept = new Map(getDownloads().map((d) => [d.episodeGuid, d]));
+  let added = 0;
+  const next: DownloadItem[] = watch.map((w) => {
+    const existing = kept.get(w.episodeGuid);
+    if (existing) return existing;
+    added++;
+    return { podcastId: w.podcastId, episodeGuid: w.episodeGuid, status: 'pending' };
+  });
+  setDownloads(next);
+
+  return { removed, added };
 }
 
 function playbackKey(episodeGuid: string) {

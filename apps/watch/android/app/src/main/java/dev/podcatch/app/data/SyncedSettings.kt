@@ -19,9 +19,13 @@ import org.json.JSONObject
 object SyncedSettings {
     private const val PREFS_NAME = "watch-settings"
     private const val KEY_WIFI_ONLY = "wifiOnlyDownloads"
+    private const val KEY_PLAY_NEXT = "playNextEpisode"
 
     /** Matches the phone's default. Episodes are large; metered data is not free. */
     private const val DEFAULT_WIFI_ONLY = true
+
+    /** Matches the phone's default. A queue that stops after one episode is not a queue. */
+    private const val DEFAULT_PLAY_NEXT = true
 
     private var prefs: SharedPreferences? = null
 
@@ -30,6 +34,14 @@ object SyncedSettings {
 
     private val _wifiOnlyDownloads = MutableStateFlow(DEFAULT_WIFI_ONLY)
     val wifiOnlyDownloads: StateFlow<Boolean> = _wifiOnlyDownloads.asStateFlow()
+
+    private val _playNextEpisode = MutableStateFlow(DEFAULT_PLAY_NEXT)
+
+    /**
+     * When an episode ends, start the next downloaded episode in [SyncedWatchEpisodes]
+     * order. That order is set by hand on the phone.
+     */
+    val playNextEpisode: StateFlow<Boolean> = _playNextEpisode.asStateFlow()
 
     @Synchronized
     fun load(context: Context) {
@@ -43,16 +55,29 @@ object SyncedSettings {
         loaded = true
         _wifiOnlyDownloads.value =
             prefs?.getBoolean(KEY_WIFI_ONLY, DEFAULT_WIFI_ONLY) ?: DEFAULT_WIFI_ONLY
+        _playNextEpisode.value =
+            prefs?.getBoolean(KEY_PLAY_NEXT, DEFAULT_PLAY_NEXT) ?: DEFAULT_PLAY_NEXT
     }
 
-    /** Apply a settings payload pushed from the phone. */
+    /**
+     * Apply a settings payload pushed from the phone.
+     *
+     * Each key is applied independently, so a payload that predates one of them leaves
+     * that setting on its stored value rather than resetting it to the default.
+     */
     fun update(json: String?) {
         if (json == null) return
         val obj = JSONObject(json)
-        if (!obj.has(KEY_WIFI_ONLY)) return
-        val value = obj.optBoolean(KEY_WIFI_ONLY, DEFAULT_WIFI_ONLY)
-        _wifiOnlyDownloads.value = value
-        prefs?.edit()?.putBoolean(KEY_WIFI_ONLY, value)?.apply()
+        if (obj.has(KEY_WIFI_ONLY)) {
+            val value = obj.optBoolean(KEY_WIFI_ONLY, DEFAULT_WIFI_ONLY)
+            _wifiOnlyDownloads.value = value
+            prefs?.edit()?.putBoolean(KEY_WIFI_ONLY, value)?.apply()
+        }
+        if (obj.has(KEY_PLAY_NEXT)) {
+            val value = obj.optBoolean(KEY_PLAY_NEXT, DEFAULT_PLAY_NEXT)
+            _playNextEpisode.value = value
+            prefs?.edit()?.putBoolean(KEY_PLAY_NEXT, value)?.apply()
+        }
     }
 
     /**

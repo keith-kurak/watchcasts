@@ -54,6 +54,14 @@ export const DataKeys = {
 export interface SyncedSettings {
   /** Only download episodes over an unmetered network. Defaults to true. */
   wifiOnlyDownloads: boolean;
+  /**
+   * When an episode ends, start the next one in the queue. Defaults to true.
+   *
+   * On the watch, "next" is the next episode in WATCH_EPISODES order that is already
+   * downloaded. That list is hand-ordered on the phone, so its order is both download
+   * priority and playback order.
+   */
+  playNextEpisode: boolean;
 }
 
 /** Advertised via CapabilityClient so each side can discover the other. */

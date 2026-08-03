@@ -5,11 +5,14 @@ import android.content.Intent
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.ui.WearUnsuitableOutputPlaybackSuppressionResolverListener
+import dev.podcatch.app.data.SyncedSettings
+import dev.podcatch.app.data.SyncedWatchEpisodes
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -57,9 +60,51 @@ class PlaybackService : MediaSessionService() {
         positionTicker = null
     }
 
+    /**
+     * Start the next downloaded episode after [afterGuid], honouring the queue order.
+     *
+     * Order comes straight from [SyncedWatchEpisodes], which mirrors the list the user
+     * drags on the phone. Episodes with no local file are skipped rather than streamed —
+     * the watch only ever plays what it has already downloaded.
+     */
+    private fun playNextAfter(afterGuid: String, player: Player) {
+        val queue = SyncedWatchEpisodes.episodes.value
+        val currentIndex = queue.indexOfFirst { it.guid == afterGuid }
+        if (currentIndex == -1) return
+        val next = queue
+            .drop(currentIndex + 1)
+            .firstOrNull { !it.localPath.isNullOrBlank() }
+            ?: return
+
+        val metadata = MediaMetadata.Builder()
+            .setTitle(next.title)
+            .setArtist(next.podcastTitle)
+            .build()
+        val item = MediaItem.Builder()
+            .setMediaId(next.guid)
+            .setUri(next.localPath)
+            .setMediaMetadata(metadata)
+            .build()
+
+        // Same rule the player screen uses: a finished episode starts over, a
+        // part-listened one resumes.
+        val saved = PlaybackState.getProgress(next.guid)
+        val startPosition = if (saved.completed) 0L else saved.positionMs
+
+        player.setMediaItem(item, startPosition)
+        player.prepare()
+        player.play()
+        PlaybackState.setCurrentEpisode(next.guid)
+    }
+
     override fun onCreate() {
         super.onCreate()
         PlaybackState.init(this)
+        // Auto-advance reads the queue and the setting from here, and this service can be
+        // started into a fresh process where neither has been loaded yet.
+        SyncedWatchEpisodes.init(this)
+        SyncedWatchEpisodes.load(this)
+        SyncedSettings.load(this)
 
         val player = ExoPlayer.Builder(this)
             .setSeekForwardIncrementMs(30_000L)
@@ -100,6 +145,11 @@ class PlaybackService : MediaSessionService() {
                             val player = mediaSession?.player
                             if (guid != null && player != null) {
                                 PlaybackState.markCompleted(guid, player.duration.coerceAtLeast(0L))
+                                // Read the flag now rather than caching it, so a change
+                                // pushed from the phone mid-episode takes effect here.
+                                if (SyncedSettings.playNextEpisode.value) {
+                                    playNextAfter(guid, player)
+                                }
                             }
                         }
                     }

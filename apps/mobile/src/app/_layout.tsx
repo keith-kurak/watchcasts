@@ -3,6 +3,7 @@ import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useColorScheme } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { AudioProvider } from '@/lib/audio-context';
@@ -20,6 +21,10 @@ const queryClient = new QueryClient({
 export default function RootLayout() {
   const colorScheme = useColorScheme();
   return (
+    // Gesture handler needs one of these above anything using a gesture. The queue lists'
+    // drag-to-reorder is the first such consumer; the drag library used to ship its own
+    // wrapper, which hid the fact that this app had none.
+    <GestureHandlerRootView style={{ flex: 1 }}>
     <QueryClientProvider client={queryClient}>
       <DownloadProvider>
       <WatchStatusProvider>
@@ -35,5 +40,6 @@ export default function RootLayout() {
       </WatchStatusProvider>
       </DownloadProvider>
     </QueryClientProvider>
+    </GestureHandlerRootView>
   );
 }

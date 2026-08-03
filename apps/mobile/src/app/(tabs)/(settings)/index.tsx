@@ -15,6 +15,8 @@ import {
   View,
 } from 'react-native';
 
+import { useQueryClient } from '@tanstack/react-query';
+
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors, NowPlayingBarHeight, Spacing } from '@/constants/theme';
@@ -24,13 +26,35 @@ import { buildOpml, parseOpml } from '@/lib/opml';
 import { fetchFeed } from '@/lib/rss';
 import {
   addSubscription,
+  getDownloads,
+  getPlayNextEpisode,
   getSubscriptions,
+  getSyncDownloads,
+  getWatchList,
   getWifiOnlyDownloads,
+  MAX_DOWNLOADS,
+  mirrorWatchListToDownloads,
   setCachedEpisodes,
+  setPlayNextEpisode,
+  setSyncDownloads,
   setWifiOnlyDownloads,
 } from '@/lib/storage';
 
 const EXPORT_FILE_NAME = 'podcatch-subscriptions.opml';
+
+/**
+ * Push the whole settings payload to the watch.
+ *
+ * The Data Layer item carries every setting at once, so this always reads all of them
+ * from storage. Sending a partial payload would leave the watch on a stale value for
+ * whatever was omitted.
+ */
+function pushSettingsToWatch() {
+  syncSettings({
+    wifiOnlyDownloads: getWifiOnlyDownloads(),
+    playNextEpisode: getPlayNextEpisode(),
+  }).catch(() => {});
+}
 
 export default function SettingsScreen() {
   const scheme = useColorScheme();
@@ -39,7 +63,10 @@ export default function SettingsScreen() {
   const [subscriptionCount, setSubscriptionCount] = useState(0);
   const [busy, setBusy] = useState<'import' | 'export' | null>(null);
   const [wifiOnly, setWifiOnly] = useState(getWifiOnlyDownloads);
+  const [playNext, setPlayNext] = useState(getPlayNextEpisode);
+  const [syncDownloads, setSyncDownloadsState] = useState(getSyncDownloads);
   const { drainPendingDownloads } = useDownloadContext();
+  const queryClient = useQueryClient();
 
   useFocusEffect(
     useCallback(() => {
@@ -52,10 +79,65 @@ export default function SettingsScreen() {
     setWifiOnlyDownloads(enabled);
     // The watch enforces this itself via its WorkManager constraint, so it needs
     // its own copy. Fire and forget — it re-syncs whenever the watch reconnects.
-    syncSettings({ wifiOnlyDownloads: enabled }).catch(() => {});
+    pushSettingsToWatch();
     // Turning the restriction off should release anything it was holding, rather
     // than leave it waiting for a network change that already happened.
     if (!enabled) drainPendingDownloads();
+  }
+
+  function handlePlayNextChange(enabled: boolean) {
+    setPlayNext(enabled);
+    setPlayNextEpisode(enabled);
+    // The watch has its own player, so it needs its own copy of this.
+    pushSettingsToWatch();
+  }
+
+  /** Apply the watch queue to the phone and start fetching whatever is missing. */
+  function applyDownloadSync() {
+    setSyncDownloadsState(true);
+    setSyncDownloads(true);
+    const { removed, added } = mirrorWatchListToDownloads();
+    queryClient.invalidateQueries({ queryKey: ['downloads'] });
+    drainPendingDownloads();
+
+    const parts: string[] = [];
+    if (added > 0) parts.push(`${added} queued for download`);
+    if (removed > 0) parts.push(`${removed} removed from this phone`);
+    if (parts.length > 0) {
+      Alert.alert('Downloads synced', parts.join(', ') + '.');
+    }
+  }
+
+  function handleSyncDownloadsChange(enabled: boolean) {
+    if (!enabled) {
+      // Leaves both lists exactly as they are. They simply stop tracking each other.
+      setSyncDownloadsState(false);
+      setSyncDownloads(false);
+      return;
+    }
+
+    // The watch wins, so anything held only by the phone is about to be deleted. Say how
+    // much before doing it — the audio files go too.
+    const watchGuids = new Set(getWatchList().map((w) => w.episodeGuid));
+    const orphans = getDownloads().filter((d) => !watchGuids.has(d.episodeGuid)).length;
+
+    if (orphans === 0) {
+      applyDownloadSync();
+      return;
+    }
+
+    Alert.alert(
+      'Replace phone downloads?',
+      `Your watch queue becomes the source of truth. ${
+        orphans === 1
+          ? '1 episode on this phone is not on your watch and will be deleted'
+          : `${orphans} episodes on this phone are not on your watch and will be deleted`
+      }.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Replace', style: 'destructive', onPress: applyDownloadSync },
+      ],
+    );
   }
 
   async function handleExport() {
@@ -186,29 +268,76 @@ export default function SettingsScreen() {
           DOWNLOADS
         </ThemedText>
 
-        <View style={[styles.row, { backgroundColor: colors.backgroundElement }]}>
-          <View style={styles.rowIcon}>
-            <SymbolView
-              name={{ ios: 'wifi', android: 'wifi' }}
-              size={24}
-              tintColor={colors.text}
-            />
-          </View>
-          <View style={styles.rowText}>
-            <ThemedText style={styles.rowTitle}>Download on Wi-Fi only</ThemedText>
-            <ThemedText type="small" themeColor="textSecondary">
-              Applies to this phone and your watch. Episodes queued while you are on
-              cellular wait until you are back on Wi-Fi.
-            </ThemedText>
-          </View>
-          <Switch value={wifiOnly} onValueChange={handleWifiOnlyChange} />
-        </View>
+        <SettingsSwitchRow
+          icon={{ ios: 'wifi', android: 'wifi' }}
+          title="Download on Wi-Fi only"
+          subtitle="Applies to this phone and your watch. Episodes queued while you are on cellular wait until you are back on Wi-Fi."
+          value={wifiOnly}
+          onValueChange={handleWifiOnlyChange}
+          backgroundColor={colors.backgroundElement}
+          tintColor={colors.text}
+        />
+
+        <SettingsSwitchRow
+          icon={{ ios: 'arrow.turn.down.right', android: 'skip_next' }}
+          title="Play next episode"
+          subtitle={`When an episode ends, start the next one in the queue. Applies to this phone and your watch. Each queue holds up to ${MAX_DOWNLOADS} episodes, in the order you drag them.`}
+          value={playNext}
+          onValueChange={handlePlayNextChange}
+          backgroundColor={colors.backgroundElement}
+          tintColor={colors.text}
+        />
+
+        <SettingsSwitchRow
+          icon={{ ios: 'arrow.triangle.2.circlepath', android: 'sync_alt' }}
+          title="Sync phone and watch downloads"
+          subtitle="Keep both queues identical — same episodes, same order. Your watch queue wins when you turn this on."
+          value={syncDownloads}
+          onValueChange={handleSyncDownloadsChange}
+          backgroundColor={colors.backgroundElement}
+          tintColor={colors.text}
+        />
       </ScrollView>
     </ThemedView>
   );
 }
 
 type SymbolName = React.ComponentProps<typeof SymbolView>['name'];
+
+interface SettingsSwitchRowProps {
+  icon: SymbolName;
+  title: string;
+  subtitle: string;
+  value: boolean;
+  onValueChange: (value: boolean) => void;
+  backgroundColor: string;
+  tintColor: string;
+}
+
+function SettingsSwitchRow({
+  icon,
+  title,
+  subtitle,
+  value,
+  onValueChange,
+  backgroundColor,
+  tintColor,
+}: SettingsSwitchRowProps) {
+  return (
+    <View style={[styles.row, { backgroundColor }]}>
+      <View style={styles.rowIcon}>
+        <SymbolView name={icon} size={24} tintColor={tintColor} />
+      </View>
+      <View style={styles.rowText}>
+        <ThemedText style={styles.rowTitle}>{title}</ThemedText>
+        <ThemedText type="small" themeColor="textSecondary">
+          {subtitle}
+        </ThemedText>
+      </View>
+      <Switch value={value} onValueChange={onValueChange} />
+    </View>
+  );
+}
 
 interface SettingsRowProps {
   icon: SymbolName;

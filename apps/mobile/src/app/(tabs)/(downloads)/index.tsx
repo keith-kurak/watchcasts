@@ -1,123 +1,65 @@
-import { LegendList, type LegendListRef } from '@legendapp/list/react-native';
-import { Image } from 'expo-image';
-import { useRouter } from 'expo-router';
-import { useRef } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { SymbolView } from 'expo-symbols';
+import { Stack } from 'expo-router';
+import { useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
-import { ThemedText } from '@/components/themed-text';
+import { PhoneQueue } from '@/components/phone-queue';
+import { SegmentedTabs, type SegmentedTab } from '@/components/segmented-tabs';
 import { ThemedView } from '@/components/themed-view';
-import { NowPlayingBarHeight, Spacing } from '@/constants/theme';
-import { useScrollToActiveDownload } from '@/hooks/use-scroll-to-active-download';
+import { WatchQueue } from '@/components/watch-queue';
+import { NowPlayingBarHeight } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { useDownloadContext } from '@/lib/download-context';
-import { formatDate, formatDuration } from '@/lib/format';
-import { useDownloadsQuery, type EnrichedDownloadItem } from '@/lib/queries';
-import { getSubscriptions } from '@/lib/storage';
+import { useWatchRefresh } from '@/hooks/use-watch-refresh';
 
-const ESTIMATED_ROW_HEIGHT = 76;
+type QueueTab = 'watch' | 'phone';
 
-function DownloadRow({ item }: { item: EnrichedDownloadItem }) {
-  const router = useRouter();
-  const theme = useTheme();
-  const { getProgress, isWaitingForWifi } = useDownloadContext();
-  const progress = getProgress(item.episodeGuid);
-  const isDownloading = item.status === 'downloading' || progress != null;
-  const waitingForWifi = item.status === 'pending' && !isDownloading && isWaitingForWifi;
-
-  return (
-    <Pressable
-      style={styles.episodeRow}
-      onPress={() =>
-        router.push({
-          pathname: '/(tabs)/(downloads)/episode/[episodeId]',
-          params: { episodeId: item.episodeGuid, podcastId: item.podcastId },
-        })
-      }
-    >
-      <Image
-        source={{ uri: item.episode.imageUrl ?? item.podcast?.artworkUrl }}
-        style={styles.thumbnail}
-        contentFit="cover"
-      />
-      <View style={styles.episodeContent}>
-        <ThemedText style={styles.episodeTitle} numberOfLines={2}>
-          {item.episode.title}
-        </ThemedText>
-        <View style={styles.episodeMeta}>
-          {isDownloading && (
-            <ThemedText type="small" themeColor="textSecondary">
-              Downloading… {progress != null ? `${Math.round(progress * 100)}%` : ''}
-            </ThemedText>
-          )}
-          {waitingForWifi && (
-            <ThemedText type="small" style={styles.waitingText}>
-              Waiting for Wi-Fi
-            </ThemedText>
-          )}
-          {item.status === 'error' && (
-            <ThemedText type="small" style={{ color: '#FF3B30' }}>
-              Error
-            </ThemedText>
-          )}
-          {item.status === 'complete' && item.episode.pubDate && (
-            <ThemedText type="small" themeColor="textSecondary">
-              {formatDate(item.episode.pubDate)}
-            </ThemedText>
-          )}
-          {item.episode.duration && (
-            <ThemedText type="small" themeColor="textSecondary">
-              {formatDuration(item.episode.duration)}
-            </ThemedText>
-          )}
-        </View>
-        {isDownloading && (
-          <View style={[styles.progressTrack, { backgroundColor: theme.backgroundElement }]}>
-            <View
-              style={[
-                styles.progressFill,
-                { width: `${Math.round((progress ?? 0) * 100)}%` },
-              ]}
-            />
-          </View>
-        )}
-      </View>
-    </Pressable>
-  );
-}
+const TABS: SegmentedTab<QueueTab>[] = [
+  { value: 'watch', label: 'Watch', icon: { ios: 'applewatch', android: 'watch' } },
+  { value: 'phone', label: 'Phone', icon: { ios: 'iphone', android: 'smartphone' } },
+];
 
 export default function DownloadsScreen() {
-  const subscriptions = getSubscriptions();
-  const { data: downloads = [], isLoading, refetch, isRefetching } = useDownloadsQuery(subscriptions);
-  const { getProgress } = useDownloadContext();
-
-  const listRef = useRef<LegendListRef>(null);
-  // `status` alone is not enough: an item is 'downloading' in storage only after the
-  // task starts, while getProgress reflects bytes actually moving.
-  const hasActiveDownload = downloads.some(
-    (d) => d.status === 'downloading' || getProgress(d.episodeGuid) != null,
-  );
-  useScrollToActiveDownload(listRef, hasActiveDownload);
+  const theme = useTheme();
+  // Watch first: this is a watch-first podcatcher, and the watch queue is the one whose
+  // order drives what actually downloads next.
+  const [tab, setTab] = useState<QueueTab>('watch');
+  const { connected, isSyncing, refresh } = useWatchRefresh();
 
   return (
     <ThemedView style={styles.container}>
-      <LegendList
-        ref={listRef}
-        data={downloads}
-        keyExtractor={(item) => item.episodeGuid}
-        estimatedItemSize={ESTIMATED_ROW_HEIGHT}
-        recycleItems
-        refreshing={isRefetching}
-        onRefresh={() => refetch()}
-        contentContainerStyle={styles.list}
-        renderItem={({ item }) => <DownloadRow item={item} />}
-        ListEmptyComponent={
-          isLoading ? null : (
-            <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
-              No episodes on phone.
-            </ThemedText>
-          )
-        }
+      <Stack.Screen
+        options={{
+          // Only the watch queue has anything to sync, so the control disappears with it
+          // rather than sitting there inert on the phone tab.
+          headerRight: () =>
+            tab === 'watch' ? (
+              <Pressable onPress={refresh} disabled={isSyncing} hitSlop={8}>
+                {isSyncing ? (
+                  <ActivityIndicator size="small" color={theme.text} />
+                ) : (
+                  <SymbolView
+                    name={{ ios: 'arrow.trianglehead.2.clockwise', android: 'sync' }}
+                    size={22}
+                    tintColor={theme.text}
+                  />
+                )}
+              </Pressable>
+            ) : null,
+        }}
       />
+      <SegmentedTabs tabs={TABS} value={tab} onChange={setTab} />
+      {/*
+        Both queues stay mounted and the inactive one is hidden, rather than swapping which
+        one is rendered. Unmounting threw away every decoded thumbnail and each list's
+        scroll position, so switching tabs flashed the artwork back in. `display: 'none'`
+        costs no layout.
+      */}
+      <View style={[styles.pane, tab !== 'watch' && styles.hiddenPane]}>
+        <WatchQueue connected={connected} />
+      </View>
+      <View style={[styles.pane, tab !== 'phone' && styles.hiddenPane]}>
+        <PhoneQueue />
+      </View>
     </ThemedView>
   );
 }
@@ -125,51 +67,14 @@ export default function DownloadsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    // The queue lists set a fixed content height for the drag maths, so they cannot also
+    // carry bottom content padding. Inset the viewport instead.
+    paddingBottom: NowPlayingBarHeight,
   },
-  list: {
-    padding: Spacing.three,
-    paddingBottom: Spacing.three + NowPlayingBarHeight,
-  },
-  episodeRow: {
-    flexDirection: 'row',
-    paddingVertical: Spacing.three,
-    // Row spacing lives here rather than as a contentContainerStyle gap, which
-    // a virtualized list cannot apply to its absolutely positioned items.
-    marginBottom: Spacing.one,
-    gap: Spacing.three,
-    alignItems: 'center',
-  },
-  thumbnail: {
-    width: 48,
-    height: 48,
-    borderRadius: 6,
-  },
-  episodeContent: {
+  pane: {
     flex: 1,
-    gap: Spacing.one,
   },
-  episodeTitle: {
-    fontWeight: '600' as const,
-  },
-  episodeMeta: {
-    flexDirection: 'row',
-    gap: Spacing.three,
-  },
-  progressTrack: {
-    height: 3,
-    borderRadius: 1.5,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: '#007AFF',
-    borderRadius: 1.5,
-  },
-  waitingText: {
-    color: '#FFB300',
-  },
-  emptyText: {
-    textAlign: 'center',
-    marginTop: Spacing.six,
+  hiddenPane: {
+    display: 'none',
   },
 });

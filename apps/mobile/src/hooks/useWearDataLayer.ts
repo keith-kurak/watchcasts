@@ -19,9 +19,15 @@ export async function syncWatchEpisodes(
   await WearDataLayerModule.syncWatchEpisodes(JSON.stringify(episodes));
 }
 
-/** Push settings the watch also honours (currently Wi-Fi-only downloads). */
+/**
+ * Push settings the watch also honours.
+ *
+ * Send the whole payload every time. The watch applies only the keys it finds, so an
+ * omitted key silently leaves it on a stale value.
+ */
 export async function syncSettings(settings: {
   wifiOnlyDownloads: boolean;
+  playNextEpisode: boolean;
 }): Promise<void> {
   if (!isAndroid) return;
   await WearDataLayerModule.syncSettings(JSON.stringify(settings));

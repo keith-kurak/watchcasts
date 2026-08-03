@@ -4,7 +4,7 @@ How the Podcatch phone app and the Wear OS app exchange data, and how the watch 
 
 > **Keep this current.** Any change to the Data Layer contract, the download worker, or watch-side state must be reflected here in the same commit. See [Change log](#change-log).
 >
-> **Status:** describes behavior as of 2026-08-02. The [Known issues](#known-issues) section lists defects that exist in the code today.
+> **Status:** describes behavior as of 2026-08-03. The [Known issues](#known-issues) section lists defects that exist in the code today.
 
 ---
 
@@ -77,17 +77,48 @@ Messages are fire-and-forget. They are dropped if the peer is unreachable.
 `/podcatch/settings` carries settings the phone owns and the watch honours. Payload today:
 
 ```json
-{ "wifiOnlyDownloads": true }
+{ "wifiOnlyDownloads": true, "playNextEpisode": true }
 ```
 
 The watch stores it in `SharedPreferences("watch-settings")` via `SyncedSettings`, for the
-same reason the episode list is persisted — a worker can run in a fresh process. Its default
-(`true`) matches the phone's, so the two agree before any sync has happened.
+same reason the episode list is persisted — a worker can run in a fresh process. Both
+defaults (`true`) match the phone's, so the two agree before any sync has happened.
+
+`SyncedSettings.update()` applies **each key independently**. A payload that omits one
+leaves that setting on its stored value rather than resetting it to the default, so an
+older phone build cannot silently clobber a newer setting. The phone nonetheless always
+sends the whole payload — `pushSettingsToWatch()` in the settings screen reads every value
+from storage on each push, because a partial payload would leave the watch stale.
 
 `SyncedSettings.load()` is called from `MainActivity.onCreate`, the settings branch of
-`DataLayerListenerService`, `WatchDownloadStatusReporter`, and
-`EpisodeDownloadWorker.buildRequest`. `MainActivity.onResume` also reads the replicated
-DataItem directly, so a freshly installed watch picks up an existing preference.
+`DataLayerListenerService`, `WatchDownloadStatusReporter`,
+`EpisodeDownloadWorker.buildRequest`, and `PlaybackService.onCreate`.
+`MainActivity.onResume` also reads the replicated DataItem directly, so a freshly installed
+watch picks up an existing preference.
+
+**Unlike the paths and keys, this payload shape is mirrored in only two places:**
+`SyncedSettings` in `packages/shared/src/datalayer.ts` and `SyncedSettings.kt`. The phone's
+`WearDataLayerModule.kt` passes the settings JSON through opaquely and never reads a key
+out of it, so adding a setting does not touch it.
+
+#### `playNextEpisode` on the watch
+
+`PlaybackService` handles this itself, in its `Player.Listener`. On `STATE_ENDED` it marks
+the episode complete, then — if the flag is set — takes the next episode in
+`SyncedWatchEpisodes.episodes` order that has a `localPath`, and plays it from its saved
+position (or from zero if it was already finished).
+
+Two consequences worth knowing:
+
+- The flag is read at the moment the episode ends, never cached, so a change pushed from
+  the phone mid-episode takes effect on that episode.
+- `PlaybackService.onCreate` now calls `SyncedWatchEpisodes.init`/`load` and
+  `SyncedSettings.load`. The service can be started into a fresh process, in which case
+  neither singleton would otherwise be populated and auto-advance would silently stop at
+  the first episode.
+
+Episodes without a local file are **skipped, not streamed.** The watch only ever plays what
+it has already downloaded.
 
 ### Capabilities
 
@@ -107,7 +138,24 @@ guid, title, podcastTitle, podcastId, audioUrl, duration, pubDate, artworkUrl
 
 Episodes whose cached episode record cannot be found are skipped. The payload carries **no download state** — the watch owns that.
 
-`triggerSync()` fires on every watch-list add and remove.
+`triggerSync()` fires on every watch-list add, remove, **and reorder**.
+
+### List order is user-controlled
+
+The order of this payload is the order the user dragged on the phone's Downloads tab, and
+it means two things on the watch at once:
+
+- **Download priority.** The worker takes the first episode it has not fetched yet, so
+  moving a row to the top makes it download next.
+- **Playback order.** `playNextEpisode` advances through this same order.
+
+There is no `order` field and no sort. Position in the array *is* the order, which is why
+reorder is a plain `setWatchList()` write on the phone and needs no watch-side change
+beyond re-reading the list it already re-reads.
+
+Both queues are capped at `MAX_DOWNLOADS` (30) in `apps/mobile/src/lib/storage.ts`. The cap
+is a usability limit before it is a storage one: drag-to-reorder stops being usable long
+before a list gets large. Adds past the cap are rejected and the phone alerts the user.
 
 ### When the watch receives it
 
@@ -231,7 +279,11 @@ episode eligible without needing to replace the work.
 7. Renames `.tmp` → `.mp3` on completion, then calls `markDownloaded`
 8. Breaks out of the loop when no eligible episode remains, and returns `Result.success()`
 
-Ordering is the phone's watch-list order. There is no priority and no parallelism — strictly one file at a time.
+Ordering is the phone's watch-list order, which the user sets by dragging (see
+[List order is user-controlled](#list-order-is-user-controlled)). There is no separate
+priority field and no parallelism — strictly one file at a time. Because step 4 re-reads the
+list on every pass, a reorder that arrives mid-download changes what gets fetched next
+without needing to replace the running worker.
 
 ### Long-running worker
 
@@ -384,6 +436,12 @@ Open defects. Each is a real, reproducible cause of user-visible breakage.
 
 K9 is deferred as T2, and disappears if T1 (OkHttp) lands first.
 
+### Low — lost affordances
+
+| # | Issue |
+|---|---|
+| K16 | Both queue lists lost pull-to-refresh and auto-scroll-to-active-download when they moved to drag-reorder. The watch queue still has its header sync button; the phone queue has no refresh at all, though it only ever reads local storage. Now that `queue-list.tsx` owns its own `ScrollView`, both are restorable — a `refreshControl` and a `scrollViewRef` are in reach. Weigh a pull-to-refresh gesture against the long-press drag before adding it. |
+
 ### Documentation drift
 
 | # | Issue | Fixed in |
@@ -405,6 +463,53 @@ duplication).
 ## 8. Change log
 
 Newest first. Add an entry whenever sync behavior changes.
+
+### 2026-08-03 — user-ordered queues, `playNextEpisode`, download sync
+
+**Contract change.** The `/podcatch/settings` payload gains `playNextEpisode` (default
+`true`). `SyncedSettings.update()` was rewritten to apply each key independently, so a
+payload that omits one no longer resets it to its default. This payload shape is mirrored in
+two files only — `datalayer.ts` and `SyncedSettings.kt` — because `WearDataLayerModule.kt`
+forwards the settings JSON without reading any key out of it.
+
+**Queue order became a user-facing feature.** The watch list was always ordered, and its
+order always drove download priority, but nothing let the user change it. The phone's
+Downloads tab now reorders both queues by long-press drag, so `triggerSync()` fires on
+reorder as well as on add and remove.
+
+Phone-side changes behind that:
+
+- `setWatchList` / `setDownloads` / `moveWatchItem` / `moveDownload` in `storage.ts`. Order
+  is still array position — no `order` field, no migration.
+- `MAX_DOWNLOADS = 30` caps both lists. `addToWatchList` / `addToDownloads` now return
+  `'added' | 'duplicate' | 'full'`, and the mutation layer alerts on `'full'`.
+- Both lists moved off `LegendList` onto `react-native-reanimated-dnd`, which requires
+  every row mounted and a fixed row height. The separate watch and phone bottom tabs
+  merged into one Downloads tab with a segmented control, watch first.
+- `queue-list.tsx` drives `useSortableList` + `SortableItem` directly rather than using the
+  library's `Sortable` wrapper. `Sortable` keys itself on a hash of the item ids, so it
+  remounted every row on every reorder, which discarded each thumbnail's decoded image and
+  made the list blink. Owning the container means re-seeding `positions` by hand when the
+  id sequence changes — the wrapper's remount was what kept it in sync. Thumbnails also set
+  `cachePolicy="memory-disk"`; `expo-image` defaults to `'disk'`, which still costs a
+  decode per mount.
+- `GestureHandlerRootView` was added at the app root. It had never been there — the drag
+  library's wrapper was silently providing one, and dropping the wrapper surfaced that.
+
+**Watch-side auto-advance.** `PlaybackService` advances on `STATE_ENDED` when
+`playNextEpisode` is set, taking the next episode with a `localPath` in queue order. Its
+`onCreate` now calls `SyncedWatchEpisodes.init`/`load` and `SyncedSettings.load`, because
+the service can be started into a fresh process where neither is populated.
+
+**Download sync.** A new phone setting keeps both queues identical. When switched on the
+**watch list wins**: `mirrorWatchListToDownloads()` deletes any phone download that is not
+on the watch — audio files included — then rebuilds the phone list in watch order. The phone
+confirms first when there is anything to delete. While on, adds, removes, and reorders
+mirror in both directions. This setting is **not** sent to the watch; it only describes what
+the phone does with its own list.
+
+**Behaviour removed.** Pull-to-refresh and auto-scroll-to-active-download are gone from both
+queue lists. The watch queue keeps its header sync button. Tracked as K16.
 
 ### 2026-08-02 — Wi-Fi-only downloads
 

@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Alert } from 'react-native';
 
 import { syncWatchEpisodes } from '@/hooks/useWearDataLayer';
 
@@ -11,13 +12,48 @@ import {
   getDownloadItem,
   getDownloads,
   getSubscriptions,
+  getSyncDownloads,
   getWatchList,
   isOnWatchList,
+  MAX_DOWNLOADS,
+  moveDownload,
+  moveWatchItem,
   removeFromDownloads,
   removeFromWatchList,
   setCachedEpisodes,
+  type AddResult,
 } from './storage';
 import type { DownloadStatus, Episode, Podcast } from './types';
+
+/**
+ * Tell the user why an add did nothing.
+ *
+ * Lives here rather than in each toggle so every caller that can fill a queue reports it
+ * the same way, including callers added later.
+ */
+function alertIfFull(result: AddResult, device: 'phone' | 'watch') {
+  if (result !== 'full') return;
+  const where = device === 'watch' ? 'watch queue' : 'phone downloads';
+  Alert.alert(
+    'Queue is full',
+    `Your ${where} already holds ${MAX_DOWNLOADS} episodes. Remove one before adding another.`,
+  );
+}
+
+/**
+ * Add an episode to the phone and start fetching it, for use when download sync mirrors
+ * a watch add. Silent about a full queue: the watch list is capped at the same number,
+ * so the phone can only be full here if the two lists have drifted.
+ */
+function mirrorAddToDownloads(
+  podcastId: string,
+  episodeGuid: string,
+  startDownload: (audioUrl: string, podcastId: string, episodeGuid: string) => void,
+) {
+  if (addToDownloads(podcastId, episodeGuid) !== 'added') return;
+  const audioUrl = getCachedEpisodes(podcastId)?.find((e) => e.guid === episodeGuid)?.audioUrl;
+  if (audioUrl) startDownload(audioUrl, podcastId, episodeGuid);
+}
 
 export function useFeedQuery(podcastId: string, feedUrl: string) {
   return useQuery({
@@ -90,12 +126,19 @@ export function useDownloadMutations() {
       episodeGuid: string;
       audioUrl: string;
     }) => {
-      addToDownloads(podcastId, episodeGuid);
-      startDownload(audioUrl, podcastId, episodeGuid);
-      return Promise.resolve();
+      const result = addToDownloads(podcastId, episodeGuid);
+      if (result === 'added') {
+        startDownload(audioUrl, podcastId, episodeGuid);
+        // Sync is symmetric: queueing on the phone also queues on the watch.
+        if (getSyncDownloads()) addToWatchList(podcastId, episodeGuid);
+      }
+      return Promise.resolve(result);
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['downloads'] });
+      queryClient.invalidateQueries({ queryKey: ['watchList'] });
+      if (getSyncDownloads()) publishWatchList();
+      alertIfFull(result, 'phone');
     },
   });
 
@@ -103,14 +146,31 @@ export function useDownloadMutations() {
     mutationFn: ({ episodeGuid }: { episodeGuid: string }) => {
       cancelDownload(episodeGuid);
       removeFromDownloads(episodeGuid);
+      if (getSyncDownloads()) removeFromWatchList(episodeGuid);
       return Promise.resolve();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['downloads'] });
+      queryClient.invalidateQueries({ queryKey: ['watchList'] });
+      if (getSyncDownloads()) publishWatchList();
     },
   });
 
-  return { add, remove };
+  const reorder = useMutation({
+    mutationFn: ({ episodeGuid, toIndex }: { episodeGuid: string; toIndex: number }) => {
+      moveDownload(episodeGuid, toIndex);
+      // Same membership under sync, so the same move applies to both lists.
+      if (getSyncDownloads()) moveWatchItem(episodeGuid, toIndex);
+      return Promise.resolve();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['downloads'] });
+      queryClient.invalidateQueries({ queryKey: ['watchList'] });
+      if (getSyncDownloads()) publishWatchList();
+    },
+  });
+
+  return { add, remove, reorder };
 }
 
 export function useWatchListQuery(subscriptions: Podcast[]) {
@@ -173,30 +233,59 @@ export function publishWatchList() {
 
 export function useWatchListMutations() {
   const queryClient = useQueryClient();
+  const { startDownload, cancelDownload } = useDownloadContext();
 
   const triggerSync = publishWatchList;
 
+  /** Both queues can change on any of these, so refresh both views. */
+  function invalidateBoth() {
+    queryClient.invalidateQueries({ queryKey: ['watchList'] });
+    queryClient.invalidateQueries({ queryKey: ['downloads'] });
+  }
+
   const add = useMutation({
     mutationFn: ({ podcastId, episodeGuid }: { podcastId: string; episodeGuid: string }) => {
-      addToWatchList(podcastId, episodeGuid);
-      return Promise.resolve();
+      const result = addToWatchList(podcastId, episodeGuid);
+      if (result === 'added' && getSyncDownloads()) {
+        mirrorAddToDownloads(podcastId, episodeGuid, startDownload);
+      }
+      return Promise.resolve(result);
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['watchList'] });
+    onSuccess: (result) => {
+      invalidateBoth();
       triggerSync();
+      alertIfFull(result, 'watch');
     },
   });
 
   const remove = useMutation({
     mutationFn: ({ episodeGuid }: { episodeGuid: string }) => {
       removeFromWatchList(episodeGuid);
+      if (getSyncDownloads()) {
+        cancelDownload(episodeGuid);
+        removeFromDownloads(episodeGuid);
+      }
       return Promise.resolve();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['watchList'] });
+      invalidateBoth();
       triggerSync();
     },
   });
 
-  return { add, remove, triggerSync };
+  const reorder = useMutation({
+    mutationFn: ({ episodeGuid, toIndex }: { episodeGuid: string; toIndex: number }) => {
+      moveWatchItem(episodeGuid, toIndex);
+      if (getSyncDownloads()) moveDownload(episodeGuid, toIndex);
+      return Promise.resolve();
+    },
+    onSuccess: () => {
+      invalidateBoth();
+      // Re-publish so the watch picks up the new download priority, not just the new
+      // display order — its worker takes the first undownloaded episode in this list.
+      triggerSync();
+    },
+  });
+
+  return { add, remove, reorder, triggerSync };
 }
