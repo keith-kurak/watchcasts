@@ -1,7 +1,12 @@
 import type { LegendListRef } from '@legendapp/list/react-native';
 import { useIsFocused } from 'expo-router';
 import { useEffect, useRef } from 'react';
-import { InteractionManager } from 'react-native';
+
+/**
+ * Long enough for the tab transition and the list's first layout pass. Scrolling
+ * before that lands short, because the list has not measured its rows yet.
+ */
+const SCROLL_DELAY_MS = 50;
 
 /**
  * Scroll a download list to the bottom when the tab is opened while something is
@@ -38,11 +43,9 @@ export function useScrollToActiveDownload(
     if (hasScrolledThisVisit.current || !hasActiveDownload) return;
     hasScrolledThisVisit.current = true;
 
-    // Wait for the tab transition to settle. Scrolling mid-animation lands short,
-    // because the list has not finished laying out its rows.
-    const handle = InteractionManager.runAfterInteractions(() => {
+    const timer = setTimeout(() => {
       listRef.current?.scrollToEnd({ animated: true });
-    });
-    return () => handle.cancel();
+    }, SCROLL_DELAY_MS);
+    return () => clearTimeout(timer);
   }, [isFocused, hasActiveDownload, listRef]);
 }

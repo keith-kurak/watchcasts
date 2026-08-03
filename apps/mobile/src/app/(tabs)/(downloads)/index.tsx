@@ -14,7 +14,7 @@ import { formatDate, formatDuration } from '@/lib/format';
 import { useDownloadsQuery, type EnrichedDownloadItem } from '@/lib/queries';
 import { getSubscriptions } from '@/lib/storage';
 
-const ESTIMATED_ROW_HEIGHT = 88;
+const ESTIMATED_ROW_HEIGHT = 76;
 
 function DownloadRow({ item }: { item: EnrichedDownloadItem }) {
   const router = useRouter();

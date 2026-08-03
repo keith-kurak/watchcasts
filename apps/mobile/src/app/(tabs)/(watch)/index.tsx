@@ -20,7 +20,7 @@ import type { WatchEpisodeStatus } from '../../modules/wear-data-layer/src';
 /** Minimum time the refresh spinner stays visible, so it does not just flicker. */
 const MIN_SPINNER_MS = 600;
 
-const ESTIMATED_ROW_HEIGHT = 88;
+const ESTIMATED_ROW_HEIGHT = 76;
 
 const WatchRow = memo(function WatchRow({
   item,
