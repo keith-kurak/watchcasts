@@ -5,6 +5,13 @@ import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.basicMarquee
@@ -27,7 +34,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.ErrorOutline
-import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.SignalWifiOff
 import androidx.compose.runtime.Composable
@@ -42,9 +48,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -539,6 +550,64 @@ fun EpisodeListScreen(
     }
 }
 
+/**
+ * A live equalizer: bars that rise and fall while audio plays.
+ *
+ * Drawn rather than using `Icons.Rounded.GraphicEq`, because that is a static vector with
+ * no way to animate its paths. Four bars on independent, deliberately non-harmonic
+ * durations — in lockstep they read as a loading spinner rather than as audio.
+ *
+ * The heights are synthetic, not driven by the audio signal. Real amplitude would mean
+ * `android.media.audiofx.Visualizer`, which needs `RECORD_AUDIO`; asking for the
+ * microphone to animate a 16dp glyph is a bad trade on a watch.
+ *
+ * Only ever composed while playback is active and out of ambient, so it never animates
+ * against a dimmed screen or an idle player.
+ */
+@Composable
+private fun EqualizerBars(
+    tint: Color,
+    modifier: Modifier = Modifier,
+) {
+    val transition = rememberInfiniteTransition(label = "equalizer")
+
+    // Coprime-ish durations so the pattern takes a long time to visibly repeat.
+    val bars = listOf(
+        BarSpec(durationMs = 430, low = 0.30f, high = 1.00f),
+        BarSpec(durationMs = 610, low = 0.85f, high = 0.25f),
+        BarSpec(durationMs = 500, low = 0.45f, high = 0.95f),
+        BarSpec(durationMs = 710, low = 1.00f, high = 0.35f),
+    )
+
+    val heights = bars.mapIndexed { index, spec ->
+        transition.animateFloat(
+            initialValue = spec.low,
+            targetValue = spec.high,
+            animationSpec = infiniteRepeatable(
+                animation = tween(spec.durationMs, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "bar$index",
+        )
+    }
+
+    Canvas(modifier = modifier) {
+        // n bars separated by n-1 gaps of the same width.
+        val unit = size.width / (bars.size * 2 - 1)
+        heights.forEachIndexed { index, height ->
+            val barHeight = (size.height * height.value).coerceAtLeast(unit)
+            drawRoundRect(
+                color = tint,
+                topLeft = Offset(x = index * 2 * unit, y = size.height - barHeight),
+                size = Size(width = unit, height = barHeight),
+                cornerRadius = CornerRadius(unit / 2),
+            )
+        }
+    }
+}
+
+private data class BarSpec(val durationMs: Int, val low: Float, val high: Float)
+
 private val NOW_PLAYING_BAR_HEIGHT = 48.dp
 
 /** Reserved at the end of the list so [NowPlayingBar] never covers the last row. */
@@ -602,20 +671,22 @@ private fun NowPlayingBar(
                 //
                 // Measured on a 454px 320dpi round screen, with the row's lowest point as
                 // the binding constraint:
-                //     top  8dp -> needs 46dp side padding, leaves 225px for the title
-                //     top 14dp -> needs 55dp side padding, leaves 188px
-                //     top 20dp -> needs 67dp side padding, leaves 142px
-                // 14/56 sits the content close to the bottom edge without starving the
-                // title, which the marquee then scrolls.
-                .padding(top = 14.dp, start = 56.dp, end = 56.dp),
+                //     top  8dp -> touches at 46dp side padding
+                //     top 11dp -> touches at 51dp
+                //     top 14dp -> touches at 55dp
+                //     top 20dp -> touches at 67dp
+                // Those are the *touch* points, not comfortable values — sitting on them
+                // puts content right against the bezel. 58dp adds ~14px of visible gap at
+                // top = 11dp, leaving ~178px for the title, which the marquee scrolls.
+                .padding(top = 11.dp, start = 58.dp, end = 58.dp),
         ) {
-            Icon(
-                // Not a play/pause glyph — tapping this opens the player, it does not
-                // toggle playback, and a transport icon would promise otherwise.
-                imageVector = Icons.Rounded.GraphicEq,
-                contentDescription = "Now playing",
+            // Not a play/pause glyph — tapping this opens the player, it does not toggle
+            // playback, and a transport icon would promise otherwise.
+            EqualizerBars(
                 tint = accent,
-                modifier = Modifier.size(16.dp),
+                modifier = Modifier
+                    .size(16.dp)
+                    .semantics { contentDescription = "Now playing" },
             )
             Spacer(modifier = Modifier.width(6.dp))
             Text(
