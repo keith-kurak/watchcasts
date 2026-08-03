@@ -1,8 +1,9 @@
+import { LegendList, type LegendListRef } from '@legendapp/list/react-native';
 import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
 import { Stack, useRouter } from 'expo-router';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -18,6 +19,8 @@ import type { WatchEpisodeStatus } from '../../modules/wear-data-layer/src';
 
 /** Minimum time the refresh spinner stays visible, so it does not just flicker. */
 const MIN_SPINNER_MS = 600;
+
+const ESTIMATED_ROW_HEIGHT = 88;
 
 const WatchRow = memo(function WatchRow({
   item,
@@ -108,7 +111,7 @@ export default function WatchScreen() {
   const [connected, setConnected] = useState<boolean | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
 
-  const listRef = useRef<FlatList<EnrichedDownloadItem>>(null);
+  const listRef = useRef<LegendListRef>(null);
   const hasActiveDownload = watchList.some(
     (item) => watchStatuses.get(item.episodeGuid)?.status === 'downloading',
   );
@@ -176,11 +179,13 @@ export default function WatchScreen() {
           </ThemedText>
         </View>
       )}
-      <FlatList
+      <LegendList
         ref={listRef}
         data={watchList}
         extraData={watchStatuses}
         keyExtractor={(item) => item.episodeGuid}
+        estimatedItemSize={ESTIMATED_ROW_HEIGHT}
+        recycleItems
         refreshing={isRefetching}
         onRefresh={() => refetch()}
         contentContainerStyle={styles.list}
@@ -214,11 +219,13 @@ const styles = StyleSheet.create({
   list: {
     padding: Spacing.three,
     paddingBottom: Spacing.three + NowPlayingBarHeight,
-    gap: Spacing.one,
   },
   episodeRow: {
     flexDirection: 'row',
     paddingVertical: Spacing.three,
+    // Row spacing lives here rather than as a contentContainerStyle gap, which
+    // a virtualized list cannot apply to its absolutely positioned items.
+    marginBottom: Spacing.one,
     gap: Spacing.three,
     alignItems: 'center',
   },

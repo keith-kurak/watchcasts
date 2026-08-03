@@ -1,7 +1,8 @@
+import { LegendList, type LegendListRef } from '@legendapp/list/react-native';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useRef } from 'react';
-import { FlatList, Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -12,6 +13,8 @@ import { useDownloadContext } from '@/lib/download-context';
 import { formatDate, formatDuration } from '@/lib/format';
 import { useDownloadsQuery, type EnrichedDownloadItem } from '@/lib/queries';
 import { getSubscriptions } from '@/lib/storage';
+
+const ESTIMATED_ROW_HEIGHT = 88;
 
 function DownloadRow({ item }: { item: EnrichedDownloadItem }) {
   const router = useRouter();
@@ -87,7 +90,7 @@ export default function DownloadsScreen() {
   const { data: downloads = [], isLoading, refetch, isRefetching } = useDownloadsQuery(subscriptions);
   const { getProgress } = useDownloadContext();
 
-  const listRef = useRef<FlatList<EnrichedDownloadItem>>(null);
+  const listRef = useRef<LegendListRef>(null);
   // `status` alone is not enough: an item is 'downloading' in storage only after the
   // task starts, while getProgress reflects bytes actually moving.
   const hasActiveDownload = downloads.some(
@@ -97,10 +100,12 @@ export default function DownloadsScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <FlatList
+      <LegendList
         ref={listRef}
         data={downloads}
         keyExtractor={(item) => item.episodeGuid}
+        estimatedItemSize={ESTIMATED_ROW_HEIGHT}
+        recycleItems
         refreshing={isRefetching}
         onRefresh={() => refetch()}
         contentContainerStyle={styles.list}
@@ -124,11 +129,13 @@ const styles = StyleSheet.create({
   list: {
     padding: Spacing.three,
     paddingBottom: Spacing.three + NowPlayingBarHeight,
-    gap: Spacing.one,
   },
   episodeRow: {
     flexDirection: 'row',
     paddingVertical: Spacing.three,
+    // Row spacing lives here rather than as a contentContainerStyle gap, which
+    // a virtualized list cannot apply to its absolutely positioned items.
+    marginBottom: Spacing.one,
     gap: Spacing.three,
     alignItems: 'center',
   },

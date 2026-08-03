@@ -1,6 +1,7 @@
+import type { LegendListRef } from '@legendapp/list/react-native';
 import { useIsFocused } from 'expo-router';
 import { useEffect, useRef } from 'react';
-import { InteractionManager, type FlatList } from 'react-native';
+import { InteractionManager } from 'react-native';
 
 /**
  * Scroll a download list to the bottom when the tab is opened while something is
@@ -21,7 +22,7 @@ import { InteractionManager, type FlatList } from 'react-native';
  * @param hasActiveDownload whether anything is currently downloading
  */
 export function useScrollToActiveDownload(
-  listRef: React.RefObject<FlatList<any> | null>,
+  listRef: React.RefObject<LegendListRef | null>,
   hasActiveDownload: boolean,
 ) {
   const isFocused = useIsFocused();
