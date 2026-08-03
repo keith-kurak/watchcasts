@@ -279,6 +279,29 @@ object SyncedWatchEpisodes {
         persist()
     }
 
+    /**
+     * Drop an episode locally, freeing its files.
+     *
+     * Optimistic: the phone owns the queue, so this exists to make removal feel immediate
+     * rather than waiting on a round trip. If the phone never receives the request, its
+     * next sync puts the episode back — the same reconciliation [update] already does.
+     */
+    fun removeEpisode(guid: String) {
+        val episode = _episodes.value.firstOrNull { it.guid == guid } ?: return
+        episode.localPath?.let { File(it).delete() }
+        episodesDir?.let { File(it, "$guid.mp3.tmp").delete() }
+        // Artwork is shared between episodes of the same podcast, so it is only removed
+        // when no remaining episode still points at it.
+        val artwork = episode.artworkPath
+        if (artwork != null && _episodes.value.none { it.guid != guid && it.artworkPath == artwork }) {
+            File(artwork).delete()
+        }
+        PlaybackState.forget(guid)
+        lastPersistedProgress.remove(guid)
+        _episodes.update { list -> list.filterNot { it.guid == guid } }
+        persist()
+    }
+
     /** Clear a failure so the worker will pick this episode up again. Manual retry only. */
     fun clearError(guid: String) {
         _episodes.update { list ->

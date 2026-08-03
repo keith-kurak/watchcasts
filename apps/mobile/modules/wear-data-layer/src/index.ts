@@ -17,6 +17,8 @@ export interface WatchEpisodeStatus {
 
 type WearDataLayerModuleEvents = {
   onWatchDownloadStatus: (event: { statuses: WatchEpisodeStatus[] }) => void;
+  /** The watch asked for an episode to be dropped from the watch queue. */
+  onWatchEpisodeRemoved: (event: { guid: string }) => void;
 };
 
 declare class WearDataLayerModule extends NativeModule<WearDataLayerModuleEvents> {

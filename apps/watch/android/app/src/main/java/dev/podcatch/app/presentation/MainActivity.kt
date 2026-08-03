@@ -95,6 +95,7 @@ import com.google.android.gms.wearable.DataMapItem
 import com.google.android.gms.wearable.Wearable
 import dev.podcatch.app.data.DataLayerContract
 import dev.podcatch.app.data.EpisodeDownloadWorker
+import dev.podcatch.app.data.PhoneRequests
 import dev.podcatch.app.data.WatchEpisode
 import dev.podcatch.app.data.SyncedSettings
 import dev.podcatch.app.data.SyncedSubscriptions
@@ -198,15 +199,19 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
 }
 
 /**
- * Long-press menu for an episode that is not downloaded. Downloading itself is
- * automatic, so the only action here is retrying a failure.
+ * Long-press menu for an episode.
+ *
+ * Downloading is automatic, so Retry only appears for something not yet on disk. Remove
+ * applies to any episode — a downloaded one is exactly what you want to clear off a watch.
  */
 @Composable
 private fun EpisodeActionsDialog(
     episode: WatchEpisode?,
     onDismiss: () -> Unit,
     onRetry: () -> Unit,
+    onRemove: () -> Unit,
 ) {
+    val isDownloaded = episode?.localPath != null
     Dialog(showDialog = episode != null, onDismissRequest = onDismiss) {
         Alert(
             title = {
@@ -220,17 +225,31 @@ private fun EpisodeActionsDialog(
             },
             message = {
                 Text(
-                    text = if (episode?.error == true) "Download failed" else "Not downloaded yet",
+                    text = when {
+                        episode?.error == true -> "Download failed"
+                        isDownloaded -> "On this watch"
+                        else -> "Not downloaded yet"
+                    },
                     style = MaterialTheme.typography.caption2,
                     textAlign = TextAlign.Center,
                 )
             },
         ) {
+            if (!isDownloaded) {
+                item {
+                    Chip(
+                        label = { Text("Retry download") },
+                        onClick = onRetry,
+                        colors = ChipDefaults.primaryChipColors(),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
             item {
                 Chip(
-                    label = { Text("Retry download") },
-                    onClick = onRetry,
-                    colors = ChipDefaults.primaryChipColors(),
+                    label = { Text("Remove from watch") },
+                    onClick = onRemove,
+                    colors = ChipDefaults.secondaryChipColors(),
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -253,6 +272,19 @@ private fun EpisodeActionsDialog(
  * running it re-reads the episode list on every loop pass, so clearing the flag makes
  * this episode eligible without needing to replace the work.
  */
+/**
+ * Drop an episode from the watch queue.
+ *
+ * Removed locally straight away so the row disappears on tap, and the phone is asked to do
+ * the same. The phone owns the queue, so if that request is lost its next sync restores the
+ * episode rather than the two silently diverging.
+ */
+private fun removeEpisodeFromWatch(context: android.content.Context, guid: String) {
+    SyncedWatchEpisodes.removeEpisode(guid)
+    PhoneRequests.removeWatchEpisode(context, guid)
+    WatchDownloadStatusReporter.reportStatus(context)
+}
+
 private fun retryEpisodeDownload(context: android.content.Context, episode: WatchEpisode) {
     if (episode.audioUrl.isBlank()) return
     SyncedWatchEpisodes.clearError(episode.guid)
@@ -410,6 +442,10 @@ fun EpisodeListScreen(
             menuEpisode?.let { retryEpisodeDownload(context, it) }
             menuGuid = null
         },
+        onRemove = {
+            menuEpisode?.let { removeEpisodeFromWatch(context, it.guid) }
+            menuGuid = null
+        },
     )
 
     // Only while audio is actually playing, and never in ambient. Reserve its height in
@@ -458,7 +494,7 @@ fun EpisodeListScreen(
                                     // the toast said otherwise. Downloading is automatic;
                                     // the only manual action is retrying a failure.
                                     onClick = { if (isDownloaded) onEpisodeClick(episode) },
-                                    onLongClick = { if (!isDownloaded) menuGuid = episode.guid },
+                                    onLongClick = { menuGuid = episode.guid },
                                 ),
                         ) {
                             val artworkModel = episode.artworkPath?.let { File(it) }

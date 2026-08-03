@@ -33,6 +33,15 @@ export const MessagePaths = {
   REQUEST_DOWNLOAD_STATUS: "/podcatch/request-download-status",
   /** Watch -> phone: JSON array of { guid, status, progress }. */
   WATCH_DOWNLOAD_STATUS: "/podcatch/watch-download-status",
+  /**
+   * Watch -> phone: "drop this episode from the watch queue." Payload is the raw
+   * episode guid as UTF-8.
+   *
+   * The only write the watch makes to phone-owned state. The phone stays the source of
+   * truth: it removes the episode and re-publishes the list, so if this message is lost
+   * the next sync simply restores the episode.
+   */
+  REMOVE_WATCH_EPISODE: "/podcatch/remove-watch-episode",
 } as const;
 
 /** Keys used inside a DataMap for the SUBSCRIPTIONS data item. */

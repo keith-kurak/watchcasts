@@ -19,6 +19,7 @@ object DataLayerContract {
     const val PATH_REQUEST_SYNC = "/podcatch/request-sync"
     const val PATH_REQUEST_DOWNLOAD_STATUS = "/podcatch/request-download-status"
     const val PATH_WATCH_DOWNLOAD_STATUS = "/podcatch/watch-download-status"
+    const val PATH_REMOVE_WATCH_EPISODE = "/podcatch/remove-watch-episode"
 
     // Keys inside the SUBSCRIPTIONS DataMap
     const val KEY_ITEMS = "items"
