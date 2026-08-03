@@ -3,7 +3,8 @@ import { Stack } from 'expo-router';
 export default function SettingsLayout() {
   return (
     <Stack>
-      <Stack.Screen name="index" options={{ title: 'Settings' }} />
+      {/* Root tab screens carry no header — the bottom tab already names them. */}
+      <Stack.Screen name="index" options={{ headerShown: false }} />
     </Stack>
   );
 }

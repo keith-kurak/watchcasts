@@ -440,7 +440,7 @@ K9 is deferred as T2, and disappears if T1 (OkHttp) lands first.
 
 | # | Issue |
 |---|---|
-| K16 | Both queue lists lost pull-to-refresh and auto-scroll-to-active-download when they moved to drag-reorder. The watch queue still has its header sync button; the phone queue has no refresh at all, though it only ever reads local storage. Now that `queue-list.tsx` owns its own `ScrollView`, both are restorable — a `refreshControl` and a `scrollViewRef` are in reach. Weigh a pull-to-refresh gesture against the long-press drag before adding it. |
+| K16 | Both queue lists lost pull-to-refresh and auto-scroll-to-active-download when they moved to drag-reorder. The watch queue has a sync button in its connection banner; the phone queue has no refresh at all, though it only ever reads local storage. Now that `queue-list.tsx` owns its own `ScrollView`, both are restorable — a `refreshControl` and a `scrollViewRef` are in reach. Weigh a pull-to-refresh gesture against the long-press drag before adding it. |
 
 ### Documentation drift
 
@@ -495,6 +495,12 @@ Phone-side changes behind that:
   decode per mount.
 - `GestureHandlerRootView` was added at the app root. It had never been there — the drag
   library's wrapper was silently providing one, and dropping the wrapper surfaced that.
+- **Only a real drag persists an order.** `SortableItem`'s `onDrop` rides the pan gesture's
+  `onFinalize`, which also runs when the gesture is *cancelled* — including on unmount. Those
+  firings were rewriting the stored order (and re-publishing it to the watch) across reloads
+  and tab switches, with no user action at all. `queue-list.tsx` now records the id from
+  `onDragStart` and ignores any drop it did not see start, and skips drops whose position
+  equals the row's current index.
 
 **Watch-side auto-advance.** `PlaybackService` advances on `STATE_ENDED` when
 `playNextEpisode` is set, taking the next episode with a `localPath` in queue order. Its
@@ -509,7 +515,13 @@ mirror in both directions. This setting is **not** sent to the watch; it only de
 the phone does with its own list.
 
 **Behaviour removed.** Pull-to-refresh and auto-scroll-to-active-download are gone from both
-queue lists. The watch queue keeps its header sync button. Tracked as K16.
+queue lists. Tracked as K16.
+
+**Chrome.** The three root tab screens dropped their stack headers; pushed screens keep
+theirs. The watch queue's sync control moved into the connection banner, Subscriptions' "+"
+became a FAB, and Settings puts the OPML rows last. Lists no longer reserve
+`NowPlayingBarHeight` unconditionally — `useNowPlayingInset` returns 0 until an episode is
+loaded, which is what was leaving a bar-sized gap above the tab bar with nothing playing.
 
 ### 2026-08-02 — Wi-Fi-only downloads
 

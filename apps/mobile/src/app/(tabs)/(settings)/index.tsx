@@ -14,12 +14,14 @@ import {
   useColorScheme,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useQueryClient } from '@tanstack/react-query';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Colors, NowPlayingBarHeight, Spacing } from '@/constants/theme';
+import { Colors, Spacing } from '@/constants/theme';
+import { useNowPlayingInset } from '@/hooks/use-now-playing-inset';
 import { syncSettings } from '@/hooks/useWearDataLayer';
 import { useDownloadContext } from '@/lib/download-context';
 import { buildOpml, parseOpml } from '@/lib/opml';
@@ -67,6 +69,8 @@ export default function SettingsScreen() {
   const [syncDownloads, setSyncDownloadsState] = useState(getSyncDownloads);
   const { drainPendingDownloads } = useDownloadContext();
   const queryClient = useQueryClient();
+  const insets = useSafeAreaInsets();
+  const nowPlayingInset = useNowPlayingInset();
 
   useFocusEffect(
     useCallback(() => {
@@ -228,43 +232,13 @@ export default function SettingsScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={[
+          styles.content,
+          // No stack header any more, so the content clears the status bar itself.
+          { paddingTop: insets.top + Spacing.three, paddingBottom: Spacing.three + nowPlayingInset },
+        ]}>
         <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionTitle}>
-          SUBSCRIPTIONS
-        </ThemedText>
-
-        <SettingsRow
-          icon={{ ios: 'square.and.arrow.down', android: 'file_open' }}
-          title="Import from OPML"
-          subtitle="Add podcasts from an OPML file"
-          busy={busy === 'import'}
-          disabled={busy != null}
-          onPress={handleImport}
-          backgroundColor={colors.backgroundElement}
-          pressedColor={colors.backgroundSelected}
-          tintColor={colors.text}
-        />
-
-        <SettingsRow
-          icon={{ ios: 'square.and.arrow.up', android: 'share' }}
-          title="Export to OPML"
-          subtitle={
-            subscriptionCount === 1
-              ? 'Share 1 subscription as a file'
-              : `Share ${subscriptionCount} subscriptions as a file`
-          }
-          busy={busy === 'export'}
-          disabled={busy != null}
-          onPress={handleExport}
-          backgroundColor={colors.backgroundElement}
-          pressedColor={colors.backgroundSelected}
-          tintColor={colors.text}
-        />
-
-        <ThemedText
-          type="smallBold"
-          themeColor="textSecondary"
-          style={[styles.sectionTitle, styles.sectionSpacing]}>
           DOWNLOADS
         </ThemedText>
 
@@ -295,6 +269,41 @@ export default function SettingsScreen() {
           value={syncDownloads}
           onValueChange={handleSyncDownloadsChange}
           backgroundColor={colors.backgroundElement}
+          tintColor={colors.text}
+        />
+
+        <ThemedText
+          type="smallBold"
+          themeColor="textSecondary"
+          style={[styles.sectionTitle, styles.sectionSpacing]}>
+          SUBSCRIPTIONS
+        </ThemedText>
+
+        <SettingsRow
+          icon={{ ios: 'square.and.arrow.down', android: 'file_open' }}
+          title="Import from OPML"
+          subtitle="Add podcasts from an OPML file"
+          busy={busy === 'import'}
+          disabled={busy != null}
+          onPress={handleImport}
+          backgroundColor={colors.backgroundElement}
+          pressedColor={colors.backgroundSelected}
+          tintColor={colors.text}
+        />
+
+        <SettingsRow
+          icon={{ ios: 'square.and.arrow.up', android: 'share' }}
+          title="Export to OPML"
+          subtitle={
+            subscriptionCount === 1
+              ? 'Share 1 subscription as a file'
+              : `Share ${subscriptionCount} subscriptions as a file`
+          }
+          busy={busy === 'export'}
+          disabled={busy != null}
+          onPress={handleExport}
+          backgroundColor={colors.backgroundElement}
+          pressedColor={colors.backgroundSelected}
           tintColor={colors.text}
         />
       </ScrollView>
@@ -393,8 +402,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    padding: Spacing.three,
-    paddingBottom: Spacing.three + NowPlayingBarHeight,
+    paddingHorizontal: Spacing.three,
     gap: Spacing.two,
   },
   sectionTitle: {

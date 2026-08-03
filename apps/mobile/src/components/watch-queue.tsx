@@ -1,11 +1,13 @@
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
+import { SymbolView } from 'expo-symbols';
 import { memo, useCallback } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { QueueList, QUEUE_ROW_HEIGHT } from '@/components/queue-list';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
+import { useNowPlayingInset } from '@/hooks/use-now-playing-inset';
 import { useTheme } from '@/hooks/use-theme';
 import { formatDate, formatDuration } from '@/lib/format';
 import { useWatchListMutations, useWatchListQuery, type EnrichedDownloadItem } from '@/lib/queries';
@@ -97,10 +99,19 @@ const WatchRow = memo(function WatchRow({
  * Position is priority: the watch's download worker always takes the first episode it
  * has not fetched yet, so dragging a row to the top makes it download next.
  */
-export function WatchQueue({ connected }: { connected: boolean | null }) {
+export function WatchQueue({
+  connected,
+  isSyncing,
+  onRefresh,
+}: {
+  connected: boolean | null;
+  isSyncing: boolean;
+  onRefresh: () => void;
+}) {
   const theme = useTheme();
   const subscriptions = getSubscriptions();
   const watchStatuses = useWatchStatuses();
+  const bottomInset = useNowPlayingInset();
   const { data: watchList = [], isLoading } = useWatchListQuery(subscriptions);
   const { reorder } = useWatchListMutations();
 
@@ -129,6 +140,25 @@ export function WatchQueue({ connected }: { connected: boolean | null }) {
           <ThemedText type="small" style={connected ? styles.connectedText : undefined}>
             {connected ? 'Watch connected' : 'No watch connected'}
           </ThemedText>
+          {/* The sync control lives with the connection state it acts on, now that there
+              is no stack header to hang it from. */}
+          <Pressable
+            onPress={onRefresh}
+            disabled={isSyncing}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Sync with watch"
+            style={styles.bannerAction}>
+            {isSyncing ? (
+              <ActivityIndicator size="small" color={theme.text} />
+            ) : (
+              <SymbolView
+                name={{ ios: 'arrow.trianglehead.2.clockwise', android: 'sync' }}
+                size={20}
+                tintColor={theme.text}
+              />
+            )}
+          </Pressable>
         </View>
       )}
       <QueueList
@@ -136,6 +166,7 @@ export function WatchQueue({ connected }: { connected: boolean | null }) {
         renderRow={renderRow}
         onReorder={handleReorder}
         isLoading={isLoading}
+        bottomInset={bottomInset}
         emptyText="No episodes queued for watch."
       />
     </>
@@ -144,9 +175,18 @@ export function WatchQueue({ connected }: { connected: boolean | null }) {
 
 const styles = StyleSheet.create({
   banner: {
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    paddingLeft: Spacing.three,
+    // Leaves room for the action button so the label stays optically centred.
+    paddingRight: Spacing.two,
+    paddingVertical: Spacing.two,
+  },
+  bannerAction: {
+    position: 'absolute',
+    right: Spacing.three,
+    padding: Spacing.half,
   },
   connectedText: {
     color: '#34C759',

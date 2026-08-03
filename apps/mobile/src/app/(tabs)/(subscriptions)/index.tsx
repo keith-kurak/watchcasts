@@ -1,6 +1,7 @@
 import { LegendList } from '@legendapp/list/react-native';
 import { Image } from 'expo-image';
-import { Stack, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
+import { SymbolView } from 'expo-symbols';
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
@@ -11,10 +12,12 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Colors, NowPlayingBarHeight, Spacing } from '@/constants/theme';
+import { BottomTabInset, Colors, Spacing } from '@/constants/theme';
+import { useNowPlayingInset } from '@/hooks/use-now-playing-inset';
 import { useColorScheme } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { fetchFeed, resolveFeedUrl } from '@/lib/rss';
@@ -31,6 +34,8 @@ export default function SubscriptionsScreen() {
   const router = useRouter();
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
+  const insets = useSafeAreaInsets();
+  const nowPlayingInset = useNowPlayingInset();
 
   const [podcasts, setPodcasts] = useState<Podcast[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
@@ -66,16 +71,6 @@ export default function SubscriptionsScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <Stack.Screen
-        options={{
-          headerRight: () => (
-            <Pressable onPress={() => setModalVisible(true)}>
-              <ThemedText style={styles.addButtonText}>+</ThemedText>
-            </Pressable>
-          ),
-        }}
-      />
-
       <LegendList
         data={podcasts}
         keyExtractor={(item) => item.id}
@@ -83,6 +78,8 @@ export default function SubscriptionsScreen() {
         recycleItems
         contentContainerStyle={[
           styles.list,
+          // No stack header any more, so the list clears the status bar itself.
+          { paddingTop: insets.top + Spacing.two, paddingBottom: nowPlayingInset },
           podcasts.length === 0 && styles.emptyList,
         ]}
         renderItem={({ item }) => (
@@ -117,6 +114,22 @@ export default function SubscriptionsScreen() {
           </ThemedText>
         }
       />
+
+      {/* Floats clear of the bottom tabs, and of the now-playing bar when it is up. */}
+      <Pressable
+        onPress={() => setModalVisible(true)}
+        accessibilityRole="button"
+        accessibilityLabel="Add podcast"
+        style={({ pressed }) => [
+          styles.fab,
+          {
+            backgroundColor: '#208AEF',
+            bottom: BottomTabInset + insets.bottom + nowPlayingInset + Spacing.three,
+          },
+          pressed && styles.fabPressed,
+        ]}>
+        <SymbolView name={{ ios: 'plus', android: 'add' }} size={28} tintColor="#fff" />
+      </Pressable>
 
       <Modal
         visible={modalVisible}
@@ -178,16 +191,29 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  addButtonText: {
-    fontSize: 28,
-    lineHeight: 32,
+  fab: {
+    position: 'absolute',
+    right: Spacing.three,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    // Elevation on Android, shadow on iOS — without one it reads as part of the list.
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+  },
+  fabPressed: {
+    opacity: 0.85,
   },
   podcastTitle: {
     fontWeight: '600',
   },
   list: {
     paddingHorizontal: Spacing.three,
-    paddingBottom: NowPlayingBarHeight,
   },
   emptyList: {
     flex: 1,

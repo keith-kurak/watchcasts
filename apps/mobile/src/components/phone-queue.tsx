@@ -9,6 +9,7 @@ import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useDownloadContext } from '@/lib/download-context';
 import { formatDate, formatDuration } from '@/lib/format';
+import { useNowPlayingInset } from '@/hooks/use-now-playing-inset';
 import { useDownloadMutations, useDownloadsQuery, type EnrichedDownloadItem } from '@/lib/queries';
 import { getSubscriptions } from '@/lib/storage';
 
@@ -82,6 +83,7 @@ function PhoneRow({ item }: { item: EnrichedDownloadItem }) {
 /** Episodes downloaded to this phone, in playback order. */
 export function PhoneQueue() {
   const subscriptions = getSubscriptions();
+  const bottomInset = useNowPlayingInset();
   const { data: downloads = [], isLoading } = useDownloadsQuery(subscriptions);
   const { reorder } = useDownloadMutations();
 
@@ -100,6 +102,7 @@ export function PhoneQueue() {
       renderRow={renderRow}
       onReorder={handleReorder}
       isLoading={isLoading}
+      bottomInset={bottomInset}
       emptyText="No episodes on phone."
     />
   );

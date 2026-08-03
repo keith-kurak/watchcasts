@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { StyleSheet } from 'react-native';
 import { ScrollView } from 'react-native-gesture-handler';
 import Animated from 'react-native-reanimated';
@@ -37,6 +37,14 @@ interface QueueListProps<T extends QueueItem> {
   emptyText: string;
   /** Suppress the empty message while the first read is still in flight. */
   isLoading?: boolean;
+  /**
+   * Extra scrollable space below the last row, for anything floating over the list.
+   *
+   * Added to the content height rather than applied as padding: rows are positioned at
+   * fixed multiples of the row height inside this container, and padding would shift them
+   * all. Growing the content leaves the maths alone and still lets the last row clear.
+   */
+  bottomInset?: number;
 }
 
 /**
@@ -75,8 +83,12 @@ function SortableQueue<T extends QueueItem>({
   items,
   renderRow,
   onReorder,
+  bottomInset = 0,
 }: Omit<QueueListProps<T>, 'emptyText' | 'isLoading'>) {
   const theme = useTheme();
+
+  /** Id of the row the user is actually dragging, or null. See `onDrop` below. */
+  const draggingId = useRef<string | null>(null);
 
   // The sortable hooks key and track rows by `id`; our items are keyed by episode guid.
   const data = useMemo(
@@ -119,13 +131,27 @@ function SortableQueue<T extends QueueItem>({
         onMomentumScrollEnd={handleScrollEnd}
         simultaneousHandlers={dropProviderRef}
         style={[styles.scrollView, { backgroundColor: theme.background }]}
-        contentContainerStyle={{ height: contentHeight }}>
+        contentContainerStyle={{ height: contentHeight + bottomInset }}>
         {data.map((item, index) => (
           <SortableItem
             key={item.id}
             {...getItemProps(item, index)}
             data={item}
-            onDrop={(id, position) => onReorder(id, position)}>
+            onDragStart={(id) => {
+              draggingId.current = id;
+            }}
+            onDrop={(id, position) => {
+              // `onDrop` rides the pan gesture's `onFinalize`, which also runs when the
+              // gesture is *cancelled* — including on unmount. Those firings carry
+              // whatever position the row happens to hold and were silently rewriting the
+              // stored order across reloads. Only honour a drop we saw start.
+              if (draggingId.current !== id) return;
+              draggingId.current = null;
+              // A drag that ends where it started is not a reorder. Skip it rather than
+              // rewrite storage and re-publish to the watch for nothing.
+              if (position === index) return;
+              onReorder(id, position);
+            }}>
             {renderRow(item)}
           </SortableItem>
         ))}
