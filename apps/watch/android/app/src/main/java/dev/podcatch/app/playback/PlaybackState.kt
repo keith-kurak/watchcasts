@@ -87,21 +87,50 @@ object PlaybackState {
         _playingGuid.value = if (isPlaying) _currentGuid.value else null
     }
 
+    /**
+     * Update the in-memory position without writing to disk.
+     *
+     * Used to drive live progress UI while audio plays. Kept separate from [savePosition]
+     * because the UI wants a tick every second and SharedPreferences does not.
+     */
+    fun publishPosition(guid: String, positionMs: Long, durationMs: Long = 0L) {
+        if (positionMs <= 0L) return
+        val previous = _progress.value[guid] ?: EpisodeProgress()
+        val duration = if (durationMs > 0L) durationMs else previous.durationMs
+        _progress.value = _progress.value +
+            (guid to EpisodeProgress(positionMs, duration, isCompleteAt(positionMs, duration)))
+    }
+
     fun savePosition(guid: String, positionMs: Long, durationMs: Long = 0L) {
         if (positionMs <= 0L) return
         val previous = _progress.value[guid] ?: EpisodeProgress()
         val duration = if (durationMs > 0L) durationMs else previous.durationMs
-        val completed = previous.completed ||
-            (duration > 0L && positionMs >= duration - COMPLETE_THRESHOLD_MS)
+        val completed = isCompleteAt(positionMs, duration)
         prefs?.edit()
             ?.also { editor ->
                 editor.putLong("position:$guid", positionMs)
                 if (duration > 0L) editor.putLong("duration:$guid", duration)
-                if (completed) editor.putBoolean("completed:$guid", true)
+                // Written both ways, not just when true. The flag used to be sticky —
+                // OR'd with its previous value — which permanently broke resume for any
+                // episode you had ever finished: the player restarts a completed episode
+                // from 0, so re-listening saved a position that was then always ignored.
+                if (completed) {
+                    editor.putBoolean("completed:$guid", true)
+                } else {
+                    editor.remove("completed:$guid")
+                }
             }
             ?.apply()
         _progress.value = _progress.value + (guid to EpisodeProgress(positionMs, duration, completed))
     }
+
+    /**
+     * Completion is derived from the position, never latched. Re-listening to a finished
+     * episode therefore clears the flag on the first save, which is what lets it resume
+     * normally from then on.
+     */
+    private fun isCompleteAt(positionMs: Long, durationMs: Long): Boolean =
+        durationMs > 0L && positionMs >= durationMs - COMPLETE_THRESHOLD_MS
 
     fun markCompleted(guid: String, durationMs: Long) {
         val previous = _progress.value[guid] ?: EpisodeProgress()
@@ -118,8 +147,6 @@ object PlaybackState {
             ?.apply()
         _progress.value = _progress.value + (guid to EpisodeProgress(position, duration, true))
     }
-
-    fun getSavedPosition(guid: String): Long = _progress.value[guid]?.positionMs ?: 0L
 
     fun getProgress(guid: String): EpisodeProgress = _progress.value[guid] ?: EpisodeProgress()
 
