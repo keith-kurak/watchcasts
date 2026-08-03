@@ -4,6 +4,23 @@
 
 Podcast app built with Expo Router and React Native. Monorepo with the mobile app at `apps/mobile/`. This is an **Android-only** app — always use the `{ ios, android }` object form of `SymbolView` `name` to include Material Symbol names (e.g. `{ ios: 'arrow.trianglehead.2.clockwise', android: 'sync' }`). Never pass iOS-only SF Symbol strings.
 
+## Phone ↔ Watch Sync
+
+`docs/watch-sync.md` is the living reference for how the phone app and the Wear OS app
+(`apps/watch/`) exchange data, and for how the watch downloads episodes.
+
+**Read it before changing any of:**
+
+- The Data Layer contract (`packages/shared/src/datalayer.ts`, `DataLayerContract.kt`,
+  `WearDataLayerModule.kt` — the paths are mirrored by hand in all three)
+- `EpisodeDownloadWorker`, `SyncedWatchEpisodes`, `SyncedSubscriptions`,
+  `WatchDownloadStatusReporter`, `DataLayerListenerService`
+- `syncWatchEpisodes` / `useWatchDownloadStatusListener` on the phone
+
+**Update it in the same commit as the change.** Revise the affected section, resolve or
+amend the matching entry in its Known issues table, and add a Change log entry at the top
+of that section. A behavior change that lands without a doc update is incomplete.
+
 ## Argent Testing Workflow
 
 After making code changes that affect the mobile UI:

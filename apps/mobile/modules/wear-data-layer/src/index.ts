@@ -7,7 +7,11 @@ interface WearNode {
 
 export interface WatchEpisodeStatus {
   guid: string;
-  status: "pending" | "downloading" | "complete" | "error";
+  /**
+   * `waiting-wifi` means the watch has the episode queued but is holding off because
+   * Wi-Fi-only downloads are enabled and it is not on an unmetered network.
+   */
+  status: "pending" | "downloading" | "complete" | "error" | "waiting-wifi";
   progress: number;
 }
 
@@ -18,6 +22,8 @@ type WearDataLayerModuleEvents = {
 declare class WearDataLayerModule extends NativeModule<WearDataLayerModuleEvents> {
   syncSubscriptions(json: string): Promise<void>;
   syncWatchEpisodes(json: string): Promise<void>;
+  /** Push app settings the watch also honours. Payload is a JSON `SyncedSettings`. */
+  syncSettings(json: string): Promise<void>;
   sendForceDownload(): Promise<void>;
   getConnectedNodes(): Promise<WearNode[]>;
   requestWatchDownloadStatus(): Promise<void>;

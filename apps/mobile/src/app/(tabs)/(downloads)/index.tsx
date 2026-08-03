@@ -1,22 +1,28 @@
+import { LegendList, type LegendListRef } from '@legendapp/list/react-native';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
-import { FlatList, Pressable, StyleSheet, View } from 'react-native';
+import { useRef } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { NowPlayingBarHeight, Spacing } from '@/constants/theme';
+import { useScrollToActiveDownload } from '@/hooks/use-scroll-to-active-download';
 import { useTheme } from '@/hooks/use-theme';
 import { useDownloadContext } from '@/lib/download-context';
 import { formatDate, formatDuration } from '@/lib/format';
 import { useDownloadsQuery, type EnrichedDownloadItem } from '@/lib/queries';
 import { getSubscriptions } from '@/lib/storage';
 
+const ESTIMATED_ROW_HEIGHT = 76;
+
 function DownloadRow({ item }: { item: EnrichedDownloadItem }) {
   const router = useRouter();
   const theme = useTheme();
-  const { getProgress } = useDownloadContext();
+  const { getProgress, isWaitingForWifi } = useDownloadContext();
   const progress = getProgress(item.episodeGuid);
   const isDownloading = item.status === 'downloading' || progress != null;
+  const waitingForWifi = item.status === 'pending' && !isDownloading && isWaitingForWifi;
 
   return (
     <Pressable
@@ -41,6 +47,11 @@ function DownloadRow({ item }: { item: EnrichedDownloadItem }) {
           {isDownloading && (
             <ThemedText type="small" themeColor="textSecondary">
               Downloading… {progress != null ? `${Math.round(progress * 100)}%` : ''}
+            </ThemedText>
+          )}
+          {waitingForWifi && (
+            <ThemedText type="small" style={styles.waitingText}>
+              Waiting for Wi-Fi
             </ThemedText>
           )}
           {item.status === 'error' && (
@@ -77,12 +88,24 @@ function DownloadRow({ item }: { item: EnrichedDownloadItem }) {
 export default function DownloadsScreen() {
   const subscriptions = getSubscriptions();
   const { data: downloads = [], isLoading, refetch, isRefetching } = useDownloadsQuery(subscriptions);
+  const { getProgress } = useDownloadContext();
+
+  const listRef = useRef<LegendListRef>(null);
+  // `status` alone is not enough: an item is 'downloading' in storage only after the
+  // task starts, while getProgress reflects bytes actually moving.
+  const hasActiveDownload = downloads.some(
+    (d) => d.status === 'downloading' || getProgress(d.episodeGuid) != null,
+  );
+  useScrollToActiveDownload(listRef, hasActiveDownload);
 
   return (
     <ThemedView style={styles.container}>
-      <FlatList
+      <LegendList
+        ref={listRef}
         data={downloads}
         keyExtractor={(item) => item.episodeGuid}
+        estimatedItemSize={ESTIMATED_ROW_HEIGHT}
+        recycleItems
         refreshing={isRefetching}
         onRefresh={() => refetch()}
         contentContainerStyle={styles.list}
@@ -106,11 +129,13 @@ const styles = StyleSheet.create({
   list: {
     padding: Spacing.three,
     paddingBottom: Spacing.three + NowPlayingBarHeight,
-    gap: Spacing.one,
   },
   episodeRow: {
     flexDirection: 'row',
     paddingVertical: Spacing.three,
+    // Row spacing lives here rather than as a contentContainerStyle gap, which
+    // a virtualized list cannot apply to its absolutely positioned items.
+    marginBottom: Spacing.one,
     gap: Spacing.three,
     alignItems: 'center',
   },
@@ -139,6 +164,9 @@ const styles = StyleSheet.create({
     height: '100%',
     backgroundColor: '#007AFF',
     borderRadius: 1.5,
+  },
+  waitingText: {
+    color: '#FFB300',
   },
   emptyText: {
     textAlign: 'center',

@@ -1,8 +1,5 @@
-import { useEffect, useState } from "react";
 import { Platform } from "react-native";
-import WearDataLayerModule, {
-  type WatchEpisodeStatus,
-} from "../../modules/wear-data-layer/src";
+import WearDataLayerModule from "../../modules/wear-data-layer/src";
 
 const isAndroid = Platform.OS === "android";
 
@@ -20,6 +17,14 @@ export async function syncWatchEpisodes(
 ): Promise<void> {
   if (!isAndroid) return;
   await WearDataLayerModule.syncWatchEpisodes(JSON.stringify(episodes));
+}
+
+/** Push settings the watch also honours (currently Wi-Fi-only downloads). */
+export async function syncSettings(settings: {
+  wifiOnlyDownloads: boolean;
+}): Promise<void> {
+  if (!isAndroid) return;
+  await WearDataLayerModule.syncSettings(JSON.stringify(settings));
 }
 
 /** Send a message to the watch to force-download any undownloaded episodes. */
@@ -42,26 +47,6 @@ export async function requestWatchDownloadStatus(): Promise<void> {
   await WearDataLayerModule.requestWatchDownloadStatus();
 }
 
-/** Subscribe to live watch download status updates. Returns a map of guid -> status for easy lookup. */
-export function useWatchDownloadStatusListener(): Map<string, WatchEpisodeStatus> {
-  const [statuses, setStatuses] = useState<Map<string, WatchEpisodeStatus>>(new Map());
-
-  useEffect(() => {
-    if (!isAndroid) return;
-
-    // Listen for status messages from the watch
-    const subscription = WearDataLayerModule.addListener(
-      "onWatchDownloadStatus",
-      (event: { statuses: WatchEpisodeStatus[] }) => {
-        setStatuses(new Map(event.statuses.map((s) => [s.guid, s])));
-      },
-    );
-
-    // Request current status from the watch
-    requestWatchDownloadStatus().catch(() => {});
-
-    return () => subscription.remove();
-  }, []);
-
-  return statuses;
-}
+// Watch download status is subscribed once for the whole app in
+// `@/lib/watch-status-context`. Use `useWatchStatuses` / `useWatchStatus` from there —
+// subscribing per component would open one native listener per episode row.

@@ -68,6 +68,24 @@ class WearDataLayerModule : Module(), MessageClient.OnMessageReceivedListener {
                 }
         }
 
+        AsyncFunction("syncSettings") { json: String, promise: Promise ->
+            val context = appContext.reactContext
+                ?: return@AsyncFunction promise.reject("ERR", "No context", null)
+            val dataClient = Wearable.getDataClient(context)
+            val request = PutDataMapRequest.create(PATH_SETTINGS).apply {
+                dataMap.putString(KEY_ITEMS, json)
+                dataMap.putLong(KEY_UPDATED_AT, System.currentTimeMillis())
+            }.asPutDataRequest().setUrgent()
+            dataClient.putDataItem(request)
+                .addOnSuccessListener {
+                    Log.d(TAG, "Settings synced to Data Layer")
+                    promise.resolve(null)
+                }
+                .addOnFailureListener { e ->
+                    promise.reject("ERR", e.message ?: "putDataItem failed", e)
+                }
+        }
+
         AsyncFunction("sendForceDownload") { promise: Promise ->
             val context = appContext.reactContext
                 ?: return@AsyncFunction promise.reject("ERR", "No context", null)
@@ -168,8 +186,11 @@ class WearDataLayerModule : Module(), MessageClient.OnMessageReceivedListener {
 
     companion object {
         private const val TAG = "WearDataLayer"
+        // Mirrored by hand from packages/shared/src/datalayer.ts and
+        // apps/watch/.../DataLayerContract.kt. Change all three together.
         private const val PATH_SUBSCRIPTIONS = "/podcatch/subscriptions"
         private const val PATH_WATCH_EPISODES = "/podcatch/watch-episodes"
+        private const val PATH_SETTINGS = "/podcatch/settings"
         private const val PATH_REQUEST_SYNC = "/podcatch/request-sync"
         private const val PATH_REQUEST_DOWNLOAD_STATUS = "/podcatch/request-download-status"
         private const val PATH_WATCH_DOWNLOAD_STATUS = "/podcatch/watch-download-status"

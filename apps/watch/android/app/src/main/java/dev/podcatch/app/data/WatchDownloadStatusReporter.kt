@@ -16,18 +16,37 @@ object WatchDownloadStatusReporter {
 
     fun reportStatus(context: Context) {
         val episodes = SyncedWatchEpisodes.episodes.value
+        // The phone replaces its whole status map with whatever we send, so an empty
+        // report wipes its UI. An empty list here means either "nothing queued" — in
+        // which case the phone already shows nothing — or "state not loaded yet",
+        // which must never be broadcast as fact.
+        if (episodes.isEmpty()) {
+            Log.d(TAG, "No episodes to report; skipping status broadcast")
+            return
+        }
+
+        // Computed once: it hits ConnectivityManager and cannot change mid-report.
+        SyncedSettings.load(context)
+        val waitingForWifi = SyncedSettings.isWaitingForWifi(context)
+
         val array = JSONArray()
         for (ep in episodes) {
             val status = when {
                 ep.localPath != null -> "complete"
                 ep.error -> "error"
-                ep.downloadProgress > 0 -> "downloading"
+                // Non-zero covers EpisodeDownloadWorker.INDETERMINATE (-1), which means
+                // "downloading, total size unknown".
+                ep.downloadProgress != 0 -> "downloading"
+                // Say *why* nothing is happening rather than a bare "pending".
+                waitingForWifi -> "waiting-wifi"
                 else -> "pending"
             }
             val progress = when {
                 ep.localPath != null -> 100
                 ep.error -> 0
-                else -> ep.downloadProgress
+                // The phone renders a percentage only when this is > 0, so an
+                // indeterminate download shows as "Downloading…" with no number.
+                else -> ep.downloadProgress.coerceAtLeast(0)
             }
             array.put(JSONObject().apply {
                 put("guid", ep.guid)

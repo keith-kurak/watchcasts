@@ -10,6 +10,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   useColorScheme,
   View,
 } from 'react-native';
@@ -17,9 +18,17 @@ import {
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors, NowPlayingBarHeight, Spacing } from '@/constants/theme';
+import { syncSettings } from '@/hooks/useWearDataLayer';
+import { useDownloadContext } from '@/lib/download-context';
 import { buildOpml, parseOpml } from '@/lib/opml';
 import { fetchFeed } from '@/lib/rss';
-import { addSubscription, getSubscriptions, setCachedEpisodes } from '@/lib/storage';
+import {
+  addSubscription,
+  getSubscriptions,
+  getWifiOnlyDownloads,
+  setCachedEpisodes,
+  setWifiOnlyDownloads,
+} from '@/lib/storage';
 
 const EXPORT_FILE_NAME = 'podcatch-subscriptions.opml';
 
@@ -29,12 +38,25 @@ export default function SettingsScreen() {
 
   const [subscriptionCount, setSubscriptionCount] = useState(0);
   const [busy, setBusy] = useState<'import' | 'export' | null>(null);
+  const [wifiOnly, setWifiOnly] = useState(getWifiOnlyDownloads);
+  const { drainPendingDownloads } = useDownloadContext();
 
   useFocusEffect(
     useCallback(() => {
       setSubscriptionCount(getSubscriptions().length);
     }, []),
   );
+
+  function handleWifiOnlyChange(enabled: boolean) {
+    setWifiOnly(enabled);
+    setWifiOnlyDownloads(enabled);
+    // The watch enforces this itself via its WorkManager constraint, so it needs
+    // its own copy. Fire and forget — it re-syncs whenever the watch reconnects.
+    syncSettings({ wifiOnlyDownloads: enabled }).catch(() => {});
+    // Turning the restriction off should release anything it was holding, rather
+    // than leave it waiting for a network change that already happened.
+    if (!enabled) drainPendingDownloads();
+  }
 
   async function handleExport() {
     const podcasts = getSubscriptions();
@@ -156,6 +178,31 @@ export default function SettingsScreen() {
           pressedColor={colors.backgroundSelected}
           tintColor={colors.text}
         />
+
+        <ThemedText
+          type="smallBold"
+          themeColor="textSecondary"
+          style={[styles.sectionTitle, styles.sectionSpacing]}>
+          DOWNLOADS
+        </ThemedText>
+
+        <View style={[styles.row, { backgroundColor: colors.backgroundElement }]}>
+          <View style={styles.rowIcon}>
+            <SymbolView
+              name={{ ios: 'wifi', android: 'wifi' }}
+              size={24}
+              tintColor={colors.text}
+            />
+          </View>
+          <View style={styles.rowText}>
+            <ThemedText style={styles.rowTitle}>Download on Wi-Fi only</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              Applies to this phone and your watch. Episodes queued while you are on
+              cellular wait until you are back on Wi-Fi.
+            </ThemedText>
+          </View>
+          <Switch value={wifiOnly} onValueChange={handleWifiOnlyChange} />
+        </View>
       </ScrollView>
     </ThemedView>
   );
@@ -223,6 +270,9 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     marginBottom: Spacing.one,
+  },
+  sectionSpacing: {
+    marginTop: Spacing.three,
   },
   row: {
     flexDirection: 'row',

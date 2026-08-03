@@ -1,10 +1,10 @@
+import { LegendList } from '@legendapp/list/react-native';
 import { Image } from 'expo-image';
 import { Stack, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
   Modal,
   Pressable,
   StyleSheet,
@@ -24,6 +24,8 @@ import {
   setCachedEpisodes,
 } from '@/lib/storage';
 import type { Podcast } from '@/lib/types';
+
+const ESTIMATED_ROW_HEIGHT = 72;
 
 export default function SubscriptionsScreen() {
   const router = useRouter();
@@ -74,9 +76,11 @@ export default function SubscriptionsScreen() {
         }}
       />
 
-      <FlatList
+      <LegendList
         data={podcasts}
         keyExtractor={(item) => item.id}
+        estimatedItemSize={ESTIMATED_ROW_HEIGHT}
+        recycleItems
         contentContainerStyle={[
           styles.list,
           podcasts.length === 0 && styles.emptyList,

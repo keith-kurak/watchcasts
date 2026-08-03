@@ -7,6 +7,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -22,11 +23,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.SignalWifiOff
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,15 +40,20 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.items
 import androidx.wear.compose.material.Card
+import androidx.wear.compose.material.Chip
+import androidx.wear.compose.material.ChipDefaults
 import androidx.wear.compose.material.CircularProgressIndicator
 import androidx.wear.compose.material.Icon
 import androidx.wear.compose.material.MaterialTheme
+import androidx.wear.compose.material.dialog.Alert
+import androidx.wear.compose.material.dialog.Dialog
 import androidx.wear.compose.material.Scaffold
 import androidx.wear.compose.material.Text
 import androidx.wear.compose.material.TimeText
@@ -54,10 +64,7 @@ import com.google.android.horologist.annotations.ExperimentalHorologistApi
 import com.google.android.horologist.audio.ui.VolumeScreen
 import com.google.android.horologist.compose.ambient.AmbientAware
 import com.google.android.horologist.compose.ambient.AmbientState
-import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
-import androidx.work.NetworkType
-import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import coil.compose.AsyncImage
 import com.google.android.gms.wearable.DataClient
@@ -68,6 +75,7 @@ import com.google.android.gms.wearable.Wearable
 import dev.podcatch.app.data.DataLayerContract
 import dev.podcatch.app.data.EpisodeDownloadWorker
 import dev.podcatch.app.data.WatchEpisode
+import dev.podcatch.app.data.SyncedSettings
 import dev.podcatch.app.data.SyncedSubscriptions
 import dev.podcatch.app.data.SyncedWatchEpisodes
 import dev.podcatch.app.data.WatchDownloadStatusReporter
@@ -83,8 +91,9 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
-        SyncedWatchEpisodes.episodesDir = File(filesDir, "episodes")
+        SyncedWatchEpisodes.load(this)
         SyncedWatchEpisodes.artworkDir?.mkdirs()
+        SyncedSettings.load(this)
         PlaybackState.init(this)
         setContent { PodcatchApp() }
     }
@@ -100,6 +109,10 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
                     val dataMap = DataMapItem.fromDataItem(item).dataMap
                     val json = dataMap.getString(DataLayerContract.KEY_ITEMS)
                     when (item.uri.path) {
+                        DataLayerContract.PATH_SETTINGS -> {
+                            Log.d(TAG, "Read existing settings from Data Layer")
+                            SyncedSettings.update(json)
+                        }
                         DataLayerContract.PATH_SUBSCRIPTIONS -> {
                             Log.d(TAG, "Read existing subscriptions from Data Layer")
                             SyncedSubscriptions.update(json)
@@ -148,19 +161,12 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
         }
         if (!hasWork) return
 
-        val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .build()
-
-        val request = OneTimeWorkRequestBuilder<EpisodeDownloadWorker>()
-            .setConstraints(constraints)
-            .setExpedited(androidx.work.OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
-            .build()
-
         WorkManager.getInstance(this).enqueueUniqueWork(
             EpisodeDownloadWorker.UNIQUE_WORK_NAME,
             ExistingWorkPolicy.KEEP,
-            request,
+            // Expedited: the watch app is open, so someone is waiting on this. The
+            // automatic Data Layer path deliberately does not spend quota here.
+            EpisodeDownloadWorker.buildRequest(this, expedited = true),
         )
         Log.d(TAG, "Enqueued episode download worker")
     }
@@ -170,20 +176,71 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
     }
 }
 
-private fun enqueueEpisodeDownload(context: android.content.Context, episode: WatchEpisode) {
+/**
+ * Long-press menu for an episode that is not downloaded. Downloading itself is
+ * automatic, so the only action here is retrying a failure.
+ */
+@Composable
+private fun EpisodeActionsDialog(
+    episode: WatchEpisode?,
+    onDismiss: () -> Unit,
+    onRetry: () -> Unit,
+) {
+    Dialog(showDialog = episode != null, onDismissRequest = onDismiss) {
+        Alert(
+            title = {
+                Text(
+                    text = episode?.title.orEmpty(),
+                    style = MaterialTheme.typography.title3,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                )
+            },
+            message = {
+                Text(
+                    text = if (episode?.error == true) "Download failed" else "Not downloaded yet",
+                    style = MaterialTheme.typography.caption2,
+                    textAlign = TextAlign.Center,
+                )
+            },
+        ) {
+            item {
+                Chip(
+                    label = { Text("Retry download") },
+                    onClick = onRetry,
+                    colors = ChipDefaults.primaryChipColors(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            item {
+                Chip(
+                    label = { Text("Cancel") },
+                    onClick = onDismiss,
+                    colors = ChipDefaults.secondaryChipColors(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Clear the failure flag and wake the download worker.
+ *
+ * `KEEP` is safe now that auto-retry and its backoff are gone: if a worker is already
+ * running it re-reads the episode list on every loop pass, so clearing the flag makes
+ * this episode eligible without needing to replace the work.
+ */
+private fun retryEpisodeDownload(context: android.content.Context, episode: WatchEpisode) {
     if (episode.audioUrl.isBlank()) return
-    android.widget.Toast.makeText(context, "Downloading…", android.widget.Toast.LENGTH_SHORT).show()
-    val constraints = Constraints.Builder()
-        .setRequiredNetworkType(NetworkType.CONNECTED)
-        .build()
-    val request = OneTimeWorkRequestBuilder<EpisodeDownloadWorker>()
-        .setConstraints(constraints)
-        .setExpedited(androidx.work.OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
-        .build()
+    SyncedWatchEpisodes.clearError(episode.guid)
+
     WorkManager.getInstance(context).enqueueUniqueWork(
         EpisodeDownloadWorker.UNIQUE_WORK_NAME,
         ExistingWorkPolicy.KEEP,
-        request,
+        // User-initiated and the user is watching the screen — worth expedited quota.
+        EpisodeDownloadWorker.buildRequest(context, expedited = true),
     )
 }
 
@@ -290,6 +347,24 @@ fun EpisodeListScreen(onEpisodeClick: (WatchEpisode) -> Unit) {
     val episodes by SyncedWatchEpisodes.episodes.collectAsState()
     val progressByGuid by PlaybackState.progress.collectAsState()
     val playingGuid by PlaybackState.playingGuid.collectAsState()
+    val context = LocalContext.current
+    val wifiOnly by SyncedSettings.wifiOnlyDownloads.collectAsState()
+    // Recomputed whenever the setting changes or the list recomposes. Good enough for a
+    // status hint; the UNMETERED constraint is what actually gates the download.
+    val waitingForWifi = wifiOnly && SyncedSettings.isWaitingForWifi(context)
+    // Guid of the episode whose long-press menu is open, if any.
+    var menuGuid by remember { mutableStateOf<String?>(null) }
+    val menuEpisode = episodes.firstOrNull { it.guid == menuGuid }
+
+    EpisodeActionsDialog(
+        episode = menuEpisode,
+        onDismiss = { menuGuid = null },
+        onRetry = {
+            menuEpisode?.let { retryEpisodeDownload(context, it) }
+            menuGuid = null
+        },
+    )
+
     ScalingLazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(top = 32.dp, start = 8.dp, end = 8.dp),
@@ -305,21 +380,29 @@ fun EpisodeListScreen(onEpisodeClick: (WatchEpisode) -> Unit) {
         } else {
             items(episodes, key = { it.guid }) { episode ->
                 val isDownloaded = episode.localPath != null
-                val context = LocalContext.current
                 Card(
-                    onClick = {
-                        if (isDownloaded) {
-                            onEpisodeClick(episode)
-                        } else {
-                            enqueueEpisodeDownload(context, episode)
-                        }
-                    },
+                    // The real gestures live on the Row below. A child clickable wins
+                    // over the Card's own, and only the child supports long-press —
+                    // Wear Compose Material 1.4 has no Card(onLongClick).
+                    onClick = {},
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 2.dp)
                         .alpha(if (isDownloaded) 1f else 0.6f),
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .combinedClickable(
+                                // Tapping a non-downloaded episode used to start a
+                                // download that was frequently discarded by KEEP while
+                                // the toast said otherwise. Downloading is automatic;
+                                // the only manual action is retrying a failure.
+                                onClick = { if (isDownloaded) onEpisodeClick(episode) },
+                                onLongClick = { if (!isDownloaded) menuGuid = episode.guid },
+                            ),
+                    ) {
                         val artworkModel = episode.artworkPath?.let { File(it) }
                             ?: episode.artworkUrl.takeIf { it.isNotBlank() }
                         if (artworkModel != null) {
@@ -357,9 +440,31 @@ fun EpisodeListScreen(onEpisodeClick: (WatchEpisode) -> Unit) {
                                 progress = progressByGuid[episode.guid],
                                 isPlaying = episode.guid == playingGuid,
                             )
-                        } else if (episode.downloadProgress > 0) {
+                        } else if (waitingForWifi && episode.downloadProgress == 0 && !episode.error) {
+                            Icon(
+                                imageVector = Icons.Rounded.SignalWifiOff,
+                                contentDescription = "Waiting for Wi-Fi",
+                                tint = Color(0xFFFFB300),
+                                modifier = Modifier.size(18.dp),
+                            )
+                        } else if (episode.error) {
+                            // Distinct from "not downloaded yet" so the long-press retry
+                            // has something to be discoverable from.
+                            Icon(
+                                imageVector = Icons.Rounded.ErrorOutline,
+                                contentDescription = "Download failed — long press to retry",
+                                tint = Color(0xFFFF6B6B),
+                                modifier = Modifier.size(18.dp),
+                            )
+                        } else if (episode.downloadProgress != 0) {
                             Text(
-                                text = "${episode.downloadProgress}%",
+                                // Negative means the server sent no Content-Length, so
+                                // there is no percentage to show — only "in progress".
+                                text = if (episode.downloadProgress > 0) {
+                                    "${episode.downloadProgress}%"
+                                } else {
+                                    "…"
+                                },
                                 style = MaterialTheme.typography.caption3,
                             )
                         } else {

@@ -1,9 +1,10 @@
-import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import { BadgedIcon, type DestinationState } from '@/components/badged-icon';
 import { RemoveDialog } from '@/components/remove-dialog';
 import { useIsOnWatchList, useWatchListMutations } from '@/lib/queries';
+import { useWatchStatus } from '@/lib/watch-status-context';
 
 interface WatchToggleProps {
   podcastId: string;
@@ -13,6 +14,7 @@ interface WatchToggleProps {
 export function WatchToggle({ podcastId, episodeGuid }: WatchToggleProps) {
   const { data: onWatchList = false } = useIsOnWatchList(episodeGuid);
   const { add, remove } = useWatchListMutations();
+  const watchStatus = useWatchStatus(episodeGuid);
   const [showRemoveDialog, setShowRemoveDialog] = useState(false);
 
   function handlePress() {
@@ -23,15 +25,32 @@ export function WatchToggle({ podcastId, episodeGuid }: WatchToggleProps) {
     }
   }
 
+  // Queued but the watch has not reported yet — treat as pending rather than idle,
+  // so adding an episode gives immediate feedback even when the watch is away.
+  let state: DestinationState = 'idle';
+  if (onWatchList) {
+    switch (watchStatus?.status) {
+      case 'complete':
+        state = 'complete';
+        break;
+      case 'error':
+        state = 'error';
+        break;
+      case 'downloading':
+        state = 'downloading';
+        break;
+      default:
+        state = 'pending';
+    }
+  }
+
   return (
     <>
       <Pressable onPress={handlePress} style={styles.button} hitSlop={8}>
         <View pointerEvents="none">
-          <SymbolView
+          <BadgedIcon
             name={{ ios: 'applewatch', android: 'watch', web: 'watch' }}
-            size={24}
-            tintColor={onWatchList ? '#34C759' : '#8E8E93'}
-            weight={onWatchList ? 'bold' : 'regular'}
+            state={state}
           />
         </View>
       </Pressable>
