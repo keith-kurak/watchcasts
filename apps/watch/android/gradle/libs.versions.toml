@@ -7,8 +7,8 @@ coreKtx = "1.13.1"
 coreSplashscreen = "1.0.1"
 lifecycle = "2.8.7"
 activityCompose = "1.9.3"
-composeBom = "2024.12.01"
-wearCompose = "1.4.0"
+composeBom = "2026.06.01"
+wearCompose = "1.6.2"
 playServicesWearable = "19.0.0"
 work = "2.10.0"
 coil = "2.7.0"
@@ -25,7 +25,14 @@ androidx-compose-ui = { group = "androidx.compose.ui", name = "ui" }
 androidx-compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
 androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
 androidx-compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
-# Compose for Wear OS (NOT the standard material3 — Wear has its own material lib)
+# Compose for Wear OS. Wear has its own Material libraries, separate from the phone
+# ones — do NOT use androidx.compose.material3 here.
+#
+# This is Wear Material *2* (androidx.wear.compose:compose-material). Wear Material 3
+# exists as androidx.wear.compose:compose-material3 and ships the same versions on the
+# same cadence, so M2 is current rather than legacy. We stay on M2 because Horologist's
+# UI (VolumeScreen, media UI, AmbientAware) depends on it — verified as of 0.8.3-alpha.
+# Revisit M3 when horologist-audio-ui moves to compose-material3.
 androidx-wear-compose-material = { group = "androidx.wear.compose", name = "compose-material", version.ref = "wearCompose" }
 androidx-wear-compose-foundation = { group = "androidx.wear.compose", name = "compose-foundation", version.ref = "wearCompose" }
 androidx-wear-compose-navigation = { group = "androidx.wear.compose", name = "compose-navigation", version.ref = "wearCompose" }

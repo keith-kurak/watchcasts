@@ -10,10 +10,52 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.ui.WearUnsuitableOutputPlaybackSuppressionResolverListener
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 class PlaybackService : MediaSessionService() {
 
     private var mediaSession: MediaSession? = null
+
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var positionTicker: Job? = null
+
+    /**
+     * Publish the play position once a second for as long as audio is playing.
+     *
+     * The player screen's ViewModel also autosaves, but it is torn down as soon as you
+     * navigate away — so without this, anything outside the player screen (the
+     * now-playing bar on the episode list) would show a position frozen at whatever was
+     * last written. This only touches the in-memory flow; durability stays with
+     * [PlaybackState.savePosition].
+     */
+    private fun startPositionTicker() {
+        if (positionTicker?.isActive == true) return
+        positionTicker = serviceScope.launch {
+            while (true) {
+                val player = mediaSession?.player
+                val guid = player?.currentMediaItem?.mediaId
+                if (player != null && guid != null && player.isPlaying) {
+                    PlaybackState.publishPosition(
+                        guid,
+                        player.currentPosition,
+                        player.duration.coerceAtLeast(0L),
+                    )
+                }
+                delay(POSITION_TICK_MS)
+            }
+        }
+    }
+
+    private fun stopPositionTicker() {
+        positionTicker?.cancel()
+        positionTicker = null
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -48,6 +90,7 @@ class PlaybackService : MediaSessionService() {
 
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
                         PlaybackState.setPlaying(isPlaying)
+                        if (isPlaying) startPositionTicker() else stopPositionTicker()
                     }
 
                     override fun onPlaybackStateChanged(playbackState: Int) {
@@ -89,6 +132,8 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        stopPositionTicker()
+        serviceScope.cancel()
         // Save position on service destroy
         mediaSession?.player?.let { player ->
             val guid = PlaybackState.currentGuid
@@ -107,6 +152,9 @@ class PlaybackService : MediaSessionService() {
     }
 
     companion object {
+        /** Live UI cadence. Persistence stays on its own slower interval. */
+        private const val POSITION_TICK_MS = 1_000L
+
         fun intent(context: Context) = Intent(context, PlaybackService::class.java)
     }
 }

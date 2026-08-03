@@ -16,7 +16,7 @@ class WearDataLayerModule : Module(), MessageClient.OnMessageReceivedListener {
     override fun definition() = ModuleDefinition {
         Name("WearDataLayerModule")
 
-        Events("onWatchDownloadStatus")
+        Events("onWatchDownloadStatus", "onWatchEpisodeRemoved")
 
         OnStartObserving {
             val context = appContext.reactContext ?: return@OnStartObserving
@@ -162,12 +162,20 @@ class WearDataLayerModule : Module(), MessageClient.OnMessageReceivedListener {
     }
 
     override fun onMessageReceived(messageEvent: MessageEvent) {
-        if (messageEvent.path != PATH_WATCH_DOWNLOAD_STATUS) return
-
-        val json = String(messageEvent.data)
-        val statuses = parseStatusJson(json)
-        Log.d(TAG, "Watch download status received: ${statuses.size} episodes")
-        sendEvent("onWatchDownloadStatus", mapOf("statuses" to statuses))
+        when (messageEvent.path) {
+            PATH_WATCH_DOWNLOAD_STATUS -> {
+                val json = String(messageEvent.data)
+                val statuses = parseStatusJson(json)
+                Log.d(TAG, "Watch download status received: ${statuses.size} episodes")
+                sendEvent("onWatchDownloadStatus", mapOf("statuses" to statuses))
+            }
+            PATH_REMOVE_WATCH_EPISODE -> {
+                val guid = String(messageEvent.data)
+                if (guid.isBlank()) return
+                Log.d(TAG, "Watch asked to remove episode $guid")
+                sendEvent("onWatchEpisodeRemoved", mapOf("guid" to guid))
+            }
+        }
     }
 
     private fun parseStatusJson(json: String): List<Map<String, Any>> {
@@ -194,6 +202,7 @@ class WearDataLayerModule : Module(), MessageClient.OnMessageReceivedListener {
         private const val PATH_REQUEST_SYNC = "/podcatch/request-sync"
         private const val PATH_REQUEST_DOWNLOAD_STATUS = "/podcatch/request-download-status"
         private const val PATH_WATCH_DOWNLOAD_STATUS = "/podcatch/watch-download-status"
+        private const val PATH_REMOVE_WATCH_EPISODE = "/podcatch/remove-watch-episode"
         private const val KEY_ITEMS = "items"
         private const val KEY_UPDATED_AT = "updatedAt"
     }
