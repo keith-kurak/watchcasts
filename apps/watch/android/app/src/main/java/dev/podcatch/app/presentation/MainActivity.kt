@@ -1,10 +1,14 @@
 package dev.podcatch.app.presentation
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -110,9 +114,21 @@ import dev.podcatch.app.presentation.theme.PodcatchTheme
 
 class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
 
+    /**
+     * The download worker runs as a foreground service, and from Android 13 a foreground
+     * service notification is **not displayed** unless POST_NOTIFICATIONS is granted. The
+     * download itself still runs either way, so this only affects whether the user can see
+     * it happening.
+     */
+    private val requestNotificationPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            Log.d(TAG, "POST_NOTIFICATIONS granted=$granted")
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
+        requestNotificationPermissionIfNeeded()
         SyncedWatchEpisodes.load(this)
         SyncedWatchEpisodes.artworkDir?.mkdirs()
         SyncedSettings.load(this)
@@ -174,6 +190,18 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
                 }
             }
         }
+    }
+
+    /**
+     * Ask once per install, on first launch. POST_NOTIFICATIONS did not exist before API 33,
+     * and minSdk here is 30, so the check is required.
+     */
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val granted = checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        if (granted) return
+        requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
     private fun enqueueDownloads() {

@@ -4,7 +4,7 @@ How the Podcatch phone app and the Wear OS app exchange data, and how the watch 
 
 > **Keep this current.** Any change to the Data Layer contract, the download worker, or watch-side state must be reflected here in the same commit. See [Change log](#change-log).
 >
-> **Status:** describes behavior as of 2026-08-02. The [Known issues](#known-issues) section lists defects that exist in the code today.
+> **Status:** describes behavior as of 2026-08-04. The [Known issues](#known-issues) section lists defects that exist in the code today.
 
 ---
 
@@ -216,20 +216,69 @@ non-terminal state. That is safe now that auto-retry and its backoff are gone: a
 worker re-reads the episode list on every loop pass, so clearing an `error` flag makes that
 episode eligible without needing to replace the work.
 
+### Network selection
+
+**This is the single biggest factor in download speed.** Wear OS keeps Wi-Fi off while the
+watch holds a Bluetooth link to the phone, and proxies all internet traffic over that link.
+The proxy runs at a few hundred kbit/s, so a 100 MB episode takes hours.
+
+The proxy also reports `NOT_METERED`. WorkManager's `UNMETERED` constraint is therefore
+satisfied, so the worker starts happily and then crawls. No constraint can express "fast".
+
+`HighBandwidthNetwork.acquire()` fixes this. It calls
+`ConnectivityManager.requestNetwork` with an explicit transport list — `TRANSPORT_WIFI`,
+plus `TRANSPORT_CELLULAR` when the Wi-Fi-only setting is off. **Naming the transports is
+what excludes the Bluetooth proxy**, and the request brings Wi-Fi up when a known network is
+in range.
+
+Three rules follow from the API:
+
+- **The returned `Network` must be used to open the connection.** The process default stays
+  the proxy. `EpisodeDownloadWorker.openConnection` does this for audio and artwork alike.
+- **`bindProcessToNetwork` is deliberately not used.** It is process-wide and would drag
+  unrelated traffic, including Play Services, off the companion link.
+- **The lease must be released.** An unreleased request keeps Wi-Fi awake and flattens the
+  battery. The worker releases it in a `finally`.
+
+Acquisition is allowed 45 s. Radio on, associate, DHCP and validation all take real time on
+a watch, and a short timeout reports "no Wi-Fi" while it is still connecting.
+
+| Outcome | What the worker does |
+|---|---|
+| Lease acquired | Downloads on that network |
+| No lease, but `isDefaultHighBandwidth()` is true | Downloads on the process default |
+| No lease, default is the Bluetooth proxy | Downloads nothing; reports `waiting-wifi`; returns `success()` |
+
+`isDefaultHighBandwidth()` covers a watch with no phone in range and the Wear emulator. In
+both, the default network is already Wi-Fi, so `acquire()` may return `null` simply because
+there was nothing to bring up. It explicitly rejects `TRANSPORT_BLUETOOTH`.
+
+The last row is a deliberate refusal, not a failure. Crawling over Bluetooth for hours is
+worse than waiting. It returns `success()` rather than `retry()` on purpose — `retry()` plus
+`KEEP` is exactly what caused **K6**, and the existing triggers (app opened, phone sync,
+settings change) re-enqueue soon enough.
+
+**Known trade-off:** a watch that never sees a known Wi-Fi network never downloads. Before
+this change it did download, just unusably slowly.
+
 ### The worker
 
 `EpisodeDownloadWorker` is a `CoroutineWorker` running on `Dispatchers.IO`.
 
-1. Calls `SyncedWatchEpisodes.load()`, then ensures `<filesDir>/episodes` exists
+1. Calls `setForeground()` (see below), then `SyncedWatchEpisodes.load()`, then ensures
+   `<filesDir>/episodes` exists
 2. If the list is empty: returns `success()` when `hasStoredList` is true (genuinely nothing
    queued), or `failure()` when it is false (no persisted state — reporting success here
    would silently swallow every queued download)
-3. Calls `downloadArtwork()` — caches every missing artwork image; failures are logged and skipped
-4. Loops: takes the **first** episode where `localPath == null && !error && audioUrl.isNotBlank()`
-5. Resumes from `<guid>.mp3.tmp` if one exists (see below), else starts fresh
-6. Streams the body to `<guid>.mp3.tmp` in 8 KB chunks
-7. Renames `.tmp` → `.mp3` on completion, then calls `markDownloaded`
-8. Breaks out of the loop when no eligible episode remains, and returns `Result.success()`
+3. Acquires a high-bandwidth network (see above), or returns early when only the Bluetooth
+   proxy is available
+4. Calls `downloadArtwork()` — caches every missing artwork image; failures are logged and skipped
+5. Loops: takes the **first** episode where `localPath == null && !error && audioUrl.isNotBlank()`
+6. Resumes from `<guid>.mp3.tmp` if one exists (see below), else starts fresh
+7. Streams the body to `<guid>.mp3.tmp` in 8 KB chunks
+8. Renames `.tmp` → `.mp3` on completion, then calls `markDownloaded`
+9. Breaks out of the loop when no eligible episode remains, and returns `Result.success()`
+10. Releases the network lease in a `finally`, whatever the outcome
 
 Ordering is the phone's watch-list order. There is no priority and no parallelism — strictly one file at a time.
 
@@ -249,6 +298,27 @@ Requirements, all of which must agree:
 
 Promotion failure is caught and logged, not fatal. The work still runs at background
 priority, and resume means a truncated attempt is no longer wasted.
+
+### Making the download visible
+
+Being promoted to a foreground service and *showing* something are separate problems. Two
+things are needed, and neither is implied by `setForeground()`:
+
+- **`POST_NOTIFICATIONS` must be granted at runtime.** From Android 13 a foreground service
+  notification is **not displayed** when it is denied. The service still runs; only the
+  notification is hidden. `MainActivity` requests it on first launch. Declaring it in the
+  manifest is not enough, and `adb install -r` preserves an existing denial.
+- **Wear OS needs an `OngoingActivity`.** A plain foreground-service notification is easy to
+  miss. `getForegroundInfo()` wraps the notification in an `OngoingActivity`
+  (`androidx.wear:wear-ongoing`) with a static icon and a touch intent back into the app, so
+  a running download appears on the watch face and in the launcher.
+
+`OngoingActivity` only adopts a notification that sets both `setOngoing(true)` and
+`CATEGORY_PROGRESS`.
+
+To check it is really there, look for `android.wearable.ongoingactivities.EXTENSIONS` in
+`adb shell dumpsys notification --noredact`. Confirming `isForeground=true` proves only that
+promotion worked, which is why this was missed for so long — see **K17**.
 
 On Android 15 a `dataSync` service is capped at 6 cumulative hours per 24. WorkManager 2.10.0
 handles that timeout internally.
@@ -375,6 +445,8 @@ Open defects. Each is a real, reproducible cause of user-visible breakage.
 | ~~K6~~ | `KEEP` plus exponential retry backoff silently dropped requests for up to 5 h | Phase 3 |
 | ~~K11~~ | `markError` left a stale percentage and the watch had no error state | Phase 3 |
 | ~~K12~~ | Tapping an episode enqueued a download it could not prioritize, behind a toast that lied | Phase 3 |
+| ~~K16~~ | All downloads ran over the Bluetooth companion proxy at a few hundred kbit/s. The proxy reports `NOT_METERED`, so the `UNMETERED` constraint was satisfied and the worker crawled instead of stalling | High-bandwidth network |
+| ~~K17~~ | `POST_NOTIFICATIONS` was declared but never requested, so the foreground service ran with its notification suppressed. Phase 2 verified `isForeground=true`, which does not imply a visible notification | High-bandwidth network |
 
 ### Medium — correctness
 
@@ -405,6 +477,44 @@ duplication).
 ## 8. Change log
 
 Newest first. Add an entry whenever sync behavior changes.
+
+### 2026-08-04 — high-bandwidth network, and a visible download
+
+Fixes **K16** and **K17**. Downloads were slow for a reason none of Phase 1-3 touched: every
+fix there addressed a stall or a restart, and the transport was the actual problem.
+
+- New `HighBandwidthNetwork`. Requests a network with an explicit transport list
+  (`TRANSPORT_WIFI`, plus `TRANSPORT_CELLULAR` when Wi-Fi-only is off), which is what
+  excludes the Bluetooth companion proxy. Needs the new `CHANGE_NETWORK_STATE` permission.
+- `EpisodeDownloadWorker` opens every connection — audio and artwork — on the acquired
+  `Network`, and releases the lease in a `finally`. An unreleased lease keeps Wi-Fi awake.
+- When no high-bandwidth network can be had and the default is the proxy, the worker
+  downloads nothing and reports `waiting-wifi`. `isDefaultHighBandwidth()` keeps a
+  standalone watch and the emulator working, where the default network is already Wi-Fi.
+- `WatchDownloadStatusReporter` now treats a failed acquisition as `waiting-wifi` too. The
+  existing `isWaitingForWifi` check cannot catch it, because the proxy reports `NOT_METERED`.
+  No new wire status, so the three hand-mirrored contract files are untouched.
+- `MainActivity` requests `POST_NOTIFICATIONS` on first launch. Without the grant, Android 13+
+  suppresses the foreground service notification — the download runs invisibly.
+- `getForegroundInfo()` wraps the notification in a Wear `OngoingActivity`
+  (new `androidx.wear:wear-ongoing` dependency), so a running download reaches the watch face.
+
+Verified on the Wear emulator (`emulator-5556`, dev variant) against the paired phone
+emulator. Logs showed `Acquired high-bandwidth network` → download → `Released
+high-bandwidth network` → `Worker result SUCCESS`. A deleted 15,877,482-byte episode came
+back byte-exact, as did a 129,048,379-byte one. `dumpsys notification --noredact` showed
+`category=progress`, `flags=ONGOING_EVENT|NO_CLEAR|FOREGROUND_SERVICE|SILENT`, and
+`android.wearable.ongoingactivities.EXTENSIONS`. The permission prompt appeared on first
+launch and `POST_NOTIFICATIONS: granted=true` afterwards.
+
+Also confirmed on a physical Pixel Watch 3 running the prod build: downloads went from
+unusably slow to fast. That is the change this entry exists for, and the emulator could not
+have shown it — its default network is already Wi-Fi, so it never had a Bluetooth proxy to
+escape.
+
+Not exercised: the refusal path. For the same reason, the emulator always has a
+high-bandwidth network available. Confirming that a Bluetooth-only watch reports
+`waiting-wifi` and downloads nothing still needs a device out of Wi-Fi range.
 
 ### 2026-08-02 — Wi-Fi-only downloads
 

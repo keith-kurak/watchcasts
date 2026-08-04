@@ -81,6 +81,7 @@ dependencies {
     implementation(libs.androidx.wear.compose.material)
     implementation(libs.androidx.wear.compose.foundation)
     implementation(libs.androidx.wear.compose.navigation)
+    implementation(libs.androidx.wear.ongoing)
 
     // Phone <-> watch communication + background downloads
     implementation(libs.play.services.wearable)
