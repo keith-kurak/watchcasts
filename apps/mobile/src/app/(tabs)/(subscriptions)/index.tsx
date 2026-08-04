@@ -1,41 +1,38 @@
 import { LegendList } from '@legendapp/list/react-native';
+import { FloatingActionButton, Host, Icon } from '@expo/ui/jetpack-compose';
 import { Image } from 'expo-image';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Modal,
-  Pressable,
-  StyleSheet,
-  TextInput,
-  View,
-} from 'react-native';
+import { Pressable, StyleSheet, useColorScheme, useWindowDimensions, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Colors, NowPlayingBarHeight, Spacing } from '@/constants/theme';
-import { useColorScheme } from 'react-native';
-import { useFocusEffect } from 'expo-router';
-import { fetchFeed, resolveFeedUrl } from '@/lib/rss';
+import { Colors, Spacing } from '@/constants/theme';
+import { useNowPlayingInset } from '@/hooks/use-now-playing-inset';
 import {
-  addSubscription,
   getSubscriptions,
-  setCachedEpisodes,
+  getSubscriptionsViewMode,
+  setSubscriptionsViewMode,
+  type SubscriptionsViewMode,
 } from '@/lib/storage';
 import type { Podcast } from '@/lib/types';
 
-const ESTIMATED_ROW_HEIGHT = 72;
+/** Colors.light and Colors.dark are const-asserted to different literal types. */
+type ThemeColors = Record<keyof (typeof Colors)['light'], string>;
+
+const LIST_ROW_HEIGHT = 72;
+const TILE_COLUMNS = 3;
+const TILE_GAP = Spacing.two;
 
 export default function SubscriptionsScreen() {
   const router = useRouter();
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
+  const nowPlayingInset = useNowPlayingInset();
+  const { width } = useWindowDimensions();
 
   const [podcasts, setPodcasts] = useState<Podcast[]>([]);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [feedUrl, setFeedUrl] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [viewMode, setViewMode] = useState<SubscriptionsViewMode>(getSubscriptionsViewMode);
 
   useFocusEffect(
     useCallback(() => {
@@ -43,74 +40,80 @@ export default function SubscriptionsScreen() {
     }, []),
   );
 
-  async function handleAddFeed() {
-    const input = feedUrl.trim();
-    if (!input) return;
-
-    setLoading(true);
-    try {
-      // Accepts an RSS URL or an Apple Podcasts link.
-      const url = await resolveFeedUrl(input);
-      const { podcast, episodes } = await fetchFeed(url);
-      addSubscription(podcast);
-      setCachedEpisodes(podcast.id, episodes);
-      setPodcasts(getSubscriptions());
-      setFeedUrl('');
-      setModalVisible(false);
-    } catch (e: any) {
-      Alert.alert('Error', e.message ?? 'Failed to fetch feed');
-    } finally {
-      setLoading(false);
-    }
+  function handleViewModeChange(mode: SubscriptionsViewMode) {
+    setViewMode(mode);
+    setSubscriptionsViewMode(mode);
   }
+
+  // Tiles are square, so the row height is the cell width. Worked out here rather than
+  // left to flex because the list needs an item size up front.
+  const gridPadding = Spacing.three;
+  const tileSize =
+    (width - gridPadding * 2 - TILE_GAP * (TILE_COLUMNS - 1)) / TILE_COLUMNS;
+
+  const isTile = viewMode === 'tile';
 
   return (
     <ThemedView style={styles.container}>
-      <Stack.Screen
-        options={{
-          headerRight: () => (
-            <Pressable onPress={() => setModalVisible(true)}>
-              <ThemedText style={styles.addButtonText}>+</ThemedText>
-            </Pressable>
-          ),
-        }}
-      />
+      <Stack.Toolbar placement="right">
+        <Stack.Toolbar.Menu
+          icon={require('@/assets/icons/more_vert.xml')}
+          title="Layout"
+          accessibilityLabel="Change layout">
+          <Stack.Toolbar.MenuAction
+            icon={require('@/assets/icons/view_module.xml')}
+            isOn={isTile}
+            onPress={() => handleViewModeChange('tile')}>
+            Tile view
+          </Stack.Toolbar.MenuAction>
+          <Stack.Toolbar.MenuAction
+            icon={require('@/assets/icons/view_list.xml')}
+            isOn={!isTile}
+            onPress={() => handleViewModeChange('list')}>
+            List view
+          </Stack.Toolbar.MenuAction>
+        </Stack.Toolbar.Menu>
+      </Stack.Toolbar>
 
       <LegendList
+        // Remounts on layout change: item size and column count both change, and the list
+        // caches measurements keyed by index.
+        key={viewMode}
         data={podcasts}
         keyExtractor={(item) => item.id}
-        estimatedItemSize={ESTIMATED_ROW_HEIGHT}
+        numColumns={isTile ? TILE_COLUMNS : 1}
+        estimatedItemSize={isTile ? tileSize + TILE_GAP : LIST_ROW_HEIGHT}
         recycleItems
         contentContainerStyle={[
-          styles.list,
+          { padding: gridPadding, paddingBottom: gridPadding + nowPlayingInset },
           podcasts.length === 0 && styles.emptyList,
         ]}
-        renderItem={({ item }) => (
-          <Pressable
-            style={({ pressed }) => [
-              styles.row,
-              { backgroundColor: pressed ? colors.backgroundSelected : 'transparent' },
-            ]}
-            onPress={() =>
-              router.push({ pathname: '/(subscriptions)/podcast/[id]', params: { id: item.id } })
-            }>
-            {item.artworkUrl ? (
-              <Image source={{ uri: item.artworkUrl }} style={styles.artwork} />
-            ) : (
-              <View style={[styles.artwork, styles.artworkPlaceholder, { backgroundColor: colors.backgroundElement }]} />
-            )}
-            <View style={styles.rowText}>
-              <ThemedText numberOfLines={1} style={styles.podcastTitle}>
-                {item.title}
-              </ThemedText>
-              {item.author && (
-                <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
-                  {item.author}
-                </ThemedText>
-              )}
-            </View>
-          </Pressable>
-        )}
+        renderItem={({ item }) =>
+          isTile ? (
+            <TileCell
+              podcast={item}
+              size={tileSize}
+              placeholderColor={colors.backgroundElement}
+              onPress={() =>
+                router.push({
+                  pathname: '/(tabs)/(subscriptions)/podcast/[id]',
+                  params: { id: item.id },
+                })
+              }
+            />
+          ) : (
+            <ListRow
+              podcast={item}
+              colors={colors}
+              onPress={() =>
+                router.push({
+                  pathname: '/(tabs)/(subscriptions)/podcast/[id]',
+                  params: { id: item.id },
+                })
+              }
+            />
+          )
+        }
         ListEmptyComponent={
           <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
             No subscriptions yet. Tap + to add a podcast.
@@ -118,59 +121,112 @@ export default function SubscriptionsScreen() {
         }
       />
 
-      <Modal
-        visible={modalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setModalVisible(false)}>
-        <Pressable style={styles.modalOverlay} onPress={() => setModalVisible(false)}>
-          <Pressable
-            style={[styles.modalContent, { backgroundColor: colors.background }]}
-            onPress={() => {}}>
-            <ThemedText style={styles.modalTitle}>
-              Add Podcast
-            </ThemedText>
-            <TextInput
-              style={[
-                styles.input,
-                {
-                  backgroundColor: colors.backgroundElement,
-                  color: colors.text,
-                },
-              ]}
-              placeholder="RSS feed or Apple Podcasts URL"
-              placeholderTextColor={colors.textSecondary}
-              value={feedUrl}
-              onChangeText={setFeedUrl}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="url"
-              returnKeyType="done"
-              onSubmitEditing={handleAddFeed}
-              editable={!loading}
-            />
-            <View style={styles.modalButtons}>
-              <Pressable
-                style={[styles.modalButton, { backgroundColor: colors.backgroundElement }]}
-                onPress={() => setModalVisible(false)}
-                disabled={loading}>
-                <ThemedText>Cancel</ThemedText>
-              </Pressable>
-              <Pressable
-                style={[styles.modalButton, styles.modalButtonPrimary]}
-                onPress={handleAddFeed}
-                disabled={loading}>
-                {loading ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <ThemedText style={styles.modalButtonPrimaryText}>Add</ThemedText>
-                )}
-              </Pressable>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      {/*
+        Material FAB from Expo UI's Jetpack Compose bindings. `Host` bridges the Compose
+        tree into React Native; `matchContents` sizes it to the button so the wrapper does
+        not swallow touches around it.
+      */}
+      <Host
+        matchContents
+        style={[
+          styles.fabHost,
+          // Offset from this screen's own bottom edge, which already sits above the tab
+          // bar — adding `BottomTabInset` here (as the now-playing bar must, being a
+          // sibling of the tab bar rather than inside a screen) lifted the button a whole
+          // tab-bar height too high. Only the now-playing bar needs clearing.
+          { bottom: nowPlayingInset + Spacing.three },
+        ]}>
+        <FloatingActionButton onClick={() => router.push('/add-podcast')}>
+          <FloatingActionButton.Icon>
+            <Icon source={require('@/assets/icons/add.xml')} size={24} />
+          </FloatingActionButton.Icon>
+        </FloatingActionButton>
+      </Host>
     </ThemedView>
+  );
+}
+
+/** Artwork-only grid cell. The title is exposed to screen readers, not drawn. */
+function TileCell({
+  podcast,
+  size,
+  placeholderColor,
+  onPress,
+}: {
+  podcast: Podcast;
+  size: number;
+  placeholderColor: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={podcast.title}
+      style={({ pressed }) => [
+        { width: size, height: size, marginBottom: TILE_GAP },
+        pressed && styles.pressed,
+      ]}>
+      {podcast.artworkUrl ? (
+        <Image
+          source={{ uri: podcast.artworkUrl }}
+          style={styles.tileArtwork}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+        />
+      ) : (
+        <View style={[styles.tileArtwork, { backgroundColor: placeholderColor }]}>
+          <ThemedText type="small" themeColor="textSecondary" numberOfLines={3}>
+            {podcast.title}
+          </ThemedText>
+        </View>
+      )}
+    </Pressable>
+  );
+}
+
+function ListRow({
+  podcast,
+  colors,
+  onPress,
+}: {
+  podcast: Podcast;
+  colors: ThemeColors;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      style={({ pressed }) => [
+        styles.row,
+        { backgroundColor: pressed ? colors.backgroundSelected : 'transparent' },
+      ]}
+      onPress={onPress}>
+      {podcast.artworkUrl ? (
+        <Image
+          source={{ uri: podcast.artworkUrl }}
+          style={styles.artwork}
+          cachePolicy="memory-disk"
+        />
+      ) : (
+        <View
+          style={[
+            styles.artwork,
+            styles.artworkPlaceholder,
+            { backgroundColor: colors.backgroundElement },
+          ]}
+        />
+      )}
+      <View style={styles.rowText}>
+        <ThemedText numberOfLines={1} style={styles.podcastTitle}>
+          {podcast.title}
+        </ThemedText>
+        {podcast.author && (
+          <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+            {podcast.author}
+          </ThemedText>
+        )}
+      </View>
+    </Pressable>
   );
 }
 
@@ -178,16 +234,8 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  addButtonText: {
-    fontSize: 28,
-    lineHeight: 32,
-  },
   podcastTitle: {
     fontWeight: '600',
-  },
-  list: {
-    paddingHorizontal: Spacing.three,
-    paddingBottom: NowPlayingBarHeight,
   },
   emptyList: {
     flex: 1,
@@ -196,6 +244,17 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     textAlign: 'center',
+  },
+  pressed: {
+    opacity: 0.7,
+  },
+  tileArtwork: {
+    width: '100%',
+    height: '100%',
+    borderRadius: Spacing.two,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: Spacing.two,
   },
   row: {
     flexDirection: 'row',
@@ -217,45 +276,8 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 2,
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: Spacing.four,
-  },
-  modalContent: {
-    width: '100%',
-    maxWidth: 400,
-    borderRadius: Spacing.three,
-    padding: Spacing.four,
-    gap: Spacing.three,
-  },
-  modalTitle: {
-    textAlign: 'center',
-    fontWeight: '600',
-  },
-  input: {
-    height: 48,
-    borderRadius: Spacing.two,
-    paddingHorizontal: Spacing.three,
-    fontSize: 16,
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    gap: Spacing.two,
-  },
-  modalButton: {
-    flex: 1,
-    height: 44,
-    borderRadius: Spacing.two,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalButtonPrimary: {
-    backgroundColor: '#208AEF',
-  },
-  modalButtonPrimaryText: {
-    color: '#fff',
+  fabHost: {
+    position: 'absolute',
+    right: Spacing.three,
   },
 });

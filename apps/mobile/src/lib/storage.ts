@@ -7,6 +7,7 @@ const SUBSCRIPTIONS_KEY = 'subscriptions';
 const DOWNLOADS_KEY = 'downloads';
 const WATCH_LIST_KEY = 'watchList';
 const WIFI_ONLY_KEY = 'wifiOnlyDownloads';
+const SUBSCRIPTIONS_VIEW_KEY = 'subscriptionsViewMode';
 
 function episodesKey(podcastId: string) {
   return `episodes:${podcastId}`;
@@ -132,6 +133,21 @@ export function getWifiOnlyDownloads(): boolean {
 
 export function setWifiOnlyDownloads(enabled: boolean): void {
   Storage.setItemSync(WIFI_ONLY_KEY, String(enabled));
+}
+
+/** How the subscriptions tab lays out its podcasts. */
+export type SubscriptionsViewMode = 'tile' | 'list';
+
+/**
+ * Defaults to the tile grid — artwork is how people recognise a podcast, and the grid
+ * shows far more of it per screen.
+ */
+export function getSubscriptionsViewMode(): SubscriptionsViewMode {
+  return Storage.getItemSync(SUBSCRIPTIONS_VIEW_KEY) === 'list' ? 'list' : 'tile';
+}
+
+export function setSubscriptionsViewMode(mode: SubscriptionsViewMode): void {
+  Storage.setItemSync(SUBSCRIPTIONS_VIEW_KEY, mode);
 }
 
 function playbackKey(episodeGuid: string) {
