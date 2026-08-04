@@ -29,6 +29,15 @@ export default function RootLayout() {
           <AnimatedSplashOverlay />
           <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="(tabs)" />
+            {/* Lives outside the tabs so it covers the tab bar while open. */}
+            <Stack.Screen
+              name="add-podcast"
+              options={{
+                presentation: 'modal',
+                headerShown: true,
+                title: 'Add Podcast',
+              }}
+            />
           </Stack>
         </ThemeProvider>
       </AudioProvider>

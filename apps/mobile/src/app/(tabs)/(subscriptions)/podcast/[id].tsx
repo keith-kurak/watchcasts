@@ -2,7 +2,6 @@ import { LegendList } from '@legendapp/list/react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
-import { SymbolView } from 'expo-symbols';
 import { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
@@ -12,7 +11,6 @@ import { WatchToggle } from '@/components/watch-toggle';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { NowPlayingBarHeight, Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
 import { formatDate, formatDuration } from '@/lib/format';
 import { useFeedQuery } from '@/lib/queries';
 import { getSubscriptions, removeSubscription } from '@/lib/storage';
@@ -25,7 +23,6 @@ export default function PodcastScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const theme = useTheme();
 
   const podcast: Podcast | undefined = getSubscriptions().find((s) => s.id === id);
   const { data: episodes = [], isLoading, refetch, isRefetching } = useFeedQuery(
@@ -55,26 +52,25 @@ export default function PodcastScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <Stack.Screen
-        options={{
-          title: podcast?.title ?? 'Podcast',
-          headerRight: () => (
-            <Pressable
-              onPress={() => setShowUnsubscribeDialog(true)}
-              hitSlop={8}
-              accessibilityLabel="Unsubscribe"
-            >
-              <View pointerEvents="none">
-                <SymbolView
-                  name={{ ios: 'trash', android: 'delete' }}
-                  size={24}
-                  tintColor={theme.text}
-                />
-              </View>
-            </Pressable>
-          ),
-        }}
-      />
+      {/*
+        `Stack.Title` rather than `Stack.Screen options={{ title }}`: the imperative
+        options form replaces the header configuration wholesale, which drops the
+        declarative `Stack.Toolbar` items below it.
+      */}
+      <Stack.Title>{podcast?.title ?? 'Podcast'}</Stack.Title>
+      {/*
+        The icon is required, not decorative: Android's toolbar renderer drops any button
+        without an `ImageSourcePropType` source, so a text-only button silently renders
+        nothing. The label survives as the accessibility name.
+      */}
+      <Stack.Toolbar placement="right">
+        <Stack.Toolbar.Button
+          icon={require('@/assets/icons/delete.xml')}
+          onPress={() => setShowUnsubscribeDialog(true)}
+          accessibilityLabel="Unsubscribe">
+          Unsubscribe
+        </Stack.Toolbar.Button>
+      </Stack.Toolbar>
       <LegendList
         data={visibleEpisodes}
         keyExtractor={(item) => item.guid}
