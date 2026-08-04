@@ -6,7 +6,15 @@ import {
   type AudioPlayer,
   type AudioStatus,
 } from 'expo-audio';
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { Platform } from 'react-native';
 
 import { getPlaybackProgress, setPlaybackProgress } from '@/lib/storage';
@@ -32,15 +40,15 @@ interface AudioContextValue {
 const AudioContext = createContext<AudioContextValue | null>(null);
 
 export function AudioProvider({ children }: { children: React.ReactNode }) {
-  const playerRef = useRef<AudioPlayer | null>(null);
+  // Lazy state rather than a ref: the player is a plain value the whole tree depends on,
+  // and reading it out of a ref during render is what the refs lint rule exists to stop.
+  // The initialiser runs once, so still only one player is ever created.
+  const [player] = useState<AudioPlayer>(() =>
+    createAudioPlayer(null, { updateInterval: 500 }),
+  );
   const [nowPlaying, setNowPlaying] = useState<NowPlaying | null>(null);
   const [playbackRate, setPlaybackRateState] = useState(1);
   const playRetryRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  if (!playerRef.current) {
-    playerRef.current = createAudioPlayer(null, { updateInterval: 500 });
-  }
-  const player = playerRef.current;
 
   useEffect(() => {
     setAudioModeAsync({
@@ -50,12 +58,82 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  function clearPlayRetry() {
+  /**
+   * What is loaded right now, readable from a callback.
+   *
+   * The status listener below is registered once per player, so it cannot close over
+   * `nowPlaying` state — it would keep seeing whatever was loaded when it was registered,
+   * which is `null`. That is what stopped the periodic progress save from ever writing.
+   */
+  const nowPlayingRef = useRef<NowPlaying | null>(null);
+  useEffect(() => {
+    nowPlayingRef.current = nowPlaying;
+  }, [nowPlaying]);
+
+  const clearPlayRetry = useCallback(() => {
     if (playRetryRef.current) {
       clearInterval(playRetryRef.current);
       playRetryRef.current = null;
     }
-  }
+  }, []);
+
+  const saveProgress = useCallback(() => {
+    const ep = nowPlayingRef.current?.episode;
+    if (!ep || !player) return;
+    const pos = player.currentTime;
+    const dur = player.duration;
+    if (dur > 0) {
+      setPlaybackProgress(ep.guid, { position: pos, duration: dur });
+    }
+  }, [player]);
+
+  const play = useCallback(
+    async (episode: Episode, podcast: Podcast, localUri?: string) => {
+      const uri = localUri ?? episode.audioUrl;
+      if (!uri) return;
+      // Save progress of currently playing episode before switching
+      saveProgress();
+      clearPlayRetry();
+      player.replace({ uri });
+      // Resume from saved position if the episode was previously in progress
+      const saved = getPlaybackProgress(episode.guid);
+      if (saved && saved.duration > 0 && saved.position / saved.duration < 0.95) {
+        player.seekTo(saved.position);
+      }
+      player.play();
+      setNowPlaying({ episode, podcast });
+
+      // On Android, play() right after replace() may silently fail while
+      // the source is still loading. Retry every 500ms until it starts.
+      let retries = 0;
+      playRetryRef.current = setInterval(() => {
+        retries++;
+        if (retries >= 20) {
+          clearPlayRetry();
+          return;
+        }
+        if (!player.playing) {
+          player.play();
+        } else {
+          clearPlayRetry();
+        }
+      }, 500);
+
+      if (Platform.OS === 'android') {
+        await requestNotificationPermissionsAsync();
+      }
+      try {
+        player.setActiveForLockScreen(true, {
+          title: episode.title,
+          artist: podcast.author ?? podcast.title,
+          artworkUrl: episode.imageUrl ?? podcast.artworkUrl,
+        });
+      } catch {
+        // Lock screen controls may fail on dev builds; non-critical
+      }
+    },
+    [player, saveProgress, clearPlayRetry],
+  );
 
   // Stop retrying once playback starts, and periodically save progress
   const progressSaveRef = useRef(0);
@@ -70,17 +148,7 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
       }
     });
     return () => sub.remove();
-  }, [player]);
-
-  function saveProgress() {
-    const ep = nowPlaying?.episode;
-    if (!ep || !player) return;
-    const pos = player.currentTime;
-    const dur = player.duration;
-    if (dur > 0) {
-      setPlaybackProgress(ep.guid, { position: pos, duration: dur });
-    }
-  }
+  }, [player, clearPlayRetry, saveProgress]);
 
   const value = useMemo<AudioContextValue>(
     () => ({
@@ -92,50 +160,7 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
         player.setPlaybackRate(rate);
         setPlaybackRateState(rate);
       },
-      play: async (episode: Episode, podcast: Podcast, localUri?: string) => {
-        const uri = localUri ?? episode.audioUrl;
-        if (!uri) return;
-        // Save progress of currently playing episode before switching
-        saveProgress();
-        clearPlayRetry();
-        player.replace({ uri });
-        // Resume from saved position if the episode was previously in progress
-        const saved = getPlaybackProgress(episode.guid);
-        if (saved && saved.duration > 0 && saved.position / saved.duration < 0.95) {
-          player.seekTo(saved.position);
-        }
-        player.play();
-        setNowPlaying({ episode, podcast });
-
-        // On Android, play() right after replace() may silently fail while
-        // the source is still loading. Retry every 500ms until it starts.
-        let retries = 0;
-        playRetryRef.current = setInterval(() => {
-          retries++;
-          if (retries >= 20) {
-            clearPlayRetry();
-            return;
-          }
-          if (!player.playing) {
-            player.play();
-          } else {
-            clearPlayRetry();
-          }
-        }, 500);
-
-        if (Platform.OS === 'android') {
-          await requestNotificationPermissionsAsync();
-        }
-        try {
-          player.setActiveForLockScreen(true, {
-            title: episode.title,
-            artist: podcast.author ?? podcast.title,
-            artworkUrl: episode.imageUrl ?? podcast.artworkUrl,
-          });
-        } catch {
-          // Lock screen controls may fail on dev builds; non-critical
-        }
-      },
+      play,
       pause: () => {
         clearPlayRetry();
         saveProgress();
@@ -146,7 +171,7 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
       },
       seekTo: (seconds: number) => player.seekTo(seconds),
     }),
-    [player, nowPlaying, playbackRate],
+    [player, nowPlaying, playbackRate, play, saveProgress, clearPlayRetry],
   );
 
   return <AudioContext.Provider value={value}>{children}</AudioContext.Provider>;
