@@ -27,7 +27,13 @@ object WatchDownloadStatusReporter {
 
         // Computed once: it hits ConnectivityManager and cannot change mid-report.
         SyncedSettings.load(context)
-        val waitingForWifi = SyncedSettings.isWaitingForWifi(context)
+        // Two different ways to be stuck without usable network, both of which the user
+        // fixes the same way — get on Wi-Fi:
+        //   1. The Wi-Fi-only setting is on and the active network is metered.
+        //   2. The download worker asked for a high-bandwidth network and got none. The
+        //      Bluetooth proxy reports NOT_METERED, so case 1 does *not* catch this.
+        val waitingForWifi = SyncedSettings.isWaitingForWifi(context) ||
+            HighBandwidthNetwork.lastAcquireFailed
 
         val array = JSONArray()
         for (ep in episodes) {

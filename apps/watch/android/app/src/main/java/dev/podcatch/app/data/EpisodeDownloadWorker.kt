@@ -2,8 +2,11 @@ package dev.podcatch.app.data
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.Network
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.work.Constraints
@@ -14,6 +17,8 @@ import androidx.work.OneTimeWorkRequest
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkerParameters
+import androidx.wear.ongoing.OngoingActivity
+import androidx.wear.ongoing.Status
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -32,6 +37,10 @@ import java.net.URL
  *
  * Partial downloads live in `<guid>.mp3.tmp` and are resumed with a `Range` header.
  * Only a fully downloaded file is renamed to `<guid>.mp3`.
+ *
+ * All traffic goes over a network acquired through [HighBandwidthNetwork]. Wear OS otherwise
+ * proxies it over the Bluetooth link to the phone, which is slow enough to make a full
+ * episode take hours.
  */
 class EpisodeDownloadWorker(
     context: Context,
@@ -69,13 +78,44 @@ class EpisodeDownloadWorker(
             }
         }
 
+        // Get off the Bluetooth companion proxy before moving a single byte. Held for the
+        // whole run rather than per episode, so Wi-Fi is not torn down and re-established
+        // between files.
+        SyncedSettings.load(applicationContext)
+        val allowMetered = !SyncedSettings.wifiOnlyDownloads.value
+        val lease = HighBandwidthNetwork.acquire(applicationContext, allowMetered)
+        try {
+            val network = lease?.network
+            if (network == null &&
+                !HighBandwidthNetwork.isDefaultHighBandwidth(applicationContext, allowMetered)
+            ) {
+                // Downloading here would mean crawling over Bluetooth at a few hundred
+                // kbit/s. Better to report why and wait for a real network.
+                Log.w(TAG, "No high-bandwidth network; leaving the queue for a later run")
+                WatchDownloadStatusReporter.reportStatus(applicationContext)
+                return@withContext Result.success()
+            }
+
+            return@withContext download(network, dir)
+        } finally {
+            lease?.release()
+        }
+    }
+
+    /**
+     * The download loop.
+     *
+     * @param network the high-bandwidth network to open connections on, or `null` when the
+     * process default is already fast (a standalone watch, or an emulator).
+     */
+    private suspend fun download(network: Network?, dir: File): Result {
         // Artwork first — it is small, and the list needs it to render offline.
-        downloadArtwork()
+        downloadArtwork(network)
 
         while (true) {
             if (isStopped) {
                 Log.d(TAG, "Worker stopped; partial download preserved for resume")
-                return@withContext Result.retry()
+                return Result.retry()
             }
 
             val episode = SyncedWatchEpisodes.episodes.value
@@ -87,7 +127,7 @@ class EpisodeDownloadWorker(
             try {
                 val resumeFrom = if (tmpFile.exists()) tmpFile.length() else 0L
 
-                val connection = (URL(episode.audioUrl).openConnection() as HttpURLConnection).apply {
+                val connection = openConnection(network, URL(episode.audioUrl)).apply {
                     // Both default to 0, which means "wait forever". A stalled connection
                     // would otherwise hang the queue with no error and no retry.
                     connectTimeout = CONNECT_TIMEOUT_MS
@@ -161,7 +201,7 @@ class EpisodeDownloadWorker(
 
                 if (stopped) {
                     Log.d(TAG, "Stopped mid-download; ${tmpFile.length()} bytes kept for resume")
-                    return@withContext Result.retry()
+                    return Result.retry()
                 }
 
                 // Atomic rename — only a fully downloaded file becomes .mp3
@@ -185,14 +225,24 @@ class EpisodeDownloadWorker(
 
         Log.d(TAG, "All episodes downloaded")
         WatchDownloadStatusReporter.reportStatus(applicationContext)
-        Result.success()
+        return Result.success()
     }
+
+    /**
+     * Open a connection on [network] when one was acquired, else on the process default.
+     *
+     * Binding the single connection is deliberate. `bindProcessToNetwork` would be
+     * process-wide and would drag unrelated traffic — including Play Services — off the
+     * companion link.
+     */
+    private fun openConnection(network: Network?, url: URL): HttpURLConnection =
+        (network?.openConnection(url) ?: url.openConnection()) as HttpURLConnection
 
     /**
      * Cache artwork for every episode that lacks it. Failures are non-fatal —
      * a missing image must not block or retry the audio downloads.
      */
-    private fun downloadArtwork() {
+    private fun downloadArtwork(network: Network?) {
         val urls = SyncedWatchEpisodes.episodes.value
             .filter { it.artworkPath == null && it.artworkUrl.isNotBlank() }
             .map { it.artworkUrl }
@@ -206,9 +256,14 @@ class EpisodeDownloadWorker(
             }
             try {
                 val tmpFile = File(outFile.absolutePath + ".tmp")
-                URL(url).openStream().use { src ->
+                val connection = openConnection(network, URL(url)).apply {
+                    connectTimeout = CONNECT_TIMEOUT_MS
+                    readTimeout = READ_TIMEOUT_MS
+                }
+                connection.inputStream.use { src ->
                     tmpFile.outputStream().use { dst -> src.copyTo(dst) }
                 }
+                connection.disconnect()
                 tmpFile.renameTo(outFile)
                 SyncedWatchEpisodes.markArtworkDownloaded(url, outFile.absolutePath)
                 Log.d(TAG, "Cached artwork $url")
@@ -227,16 +282,39 @@ class EpisodeDownloadWorker(
                 NotificationChannel(channelId, "Episode Downloads", NotificationManager.IMPORTANCE_LOW)
             )
         }
-        val notification = NotificationCompat.Builder(applicationContext, channelId)
+        val builder = NotificationCompat.Builder(applicationContext, channelId)
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentTitle("Downloading episodes")
             .setSilent(true)
+            // Both are required for OngoingActivity to adopt this notification.
+            .setOngoing(true)
+            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+
+        // Tapping the ongoing activity opens the app. Wear requires a touch intent.
+        val touchIntent = PendingIntent.getActivity(
+            applicationContext,
+            0,
+            Intent().setClassName(
+                applicationContext,
+                "dev.podcatch.app.presentation.MainActivity",
+            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_IMMUTABLE,
+        )
+
+        // A plain foreground-service notification is easy to miss on Wear OS. An
+        // OngoingActivity puts the running download on the watch face and in the launcher.
+        OngoingActivity.Builder(applicationContext, NOTIFICATION_ID, builder)
+            .setStaticIcon(android.R.drawable.stat_sys_download)
+            .setTouchIntent(touchIntent)
+            .setStatus(Status.Builder().addTemplate("Downloading episodes").build())
             .build()
+            .apply(applicationContext)
+
         // The type is required from API 34 and must match the manifest declaration on
         // WorkManager's SystemForegroundService. minSdk is 30, so this always applies.
         return ForegroundInfo(
             NOTIFICATION_ID,
-            notification,
+            builder.build(),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
         )
     }
