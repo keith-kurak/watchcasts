@@ -102,7 +102,20 @@ export async function fetchFeed(
     audioUrl: item.enclosure?.['@_url'] ?? undefined,
     duration: item['itunes:duration'] != null ? String(item['itunes:duration']) : undefined,
     imageUrl: item['itunes:image']?.['@_href'] ?? undefined,
+    sizeBytes: parseEnclosureLength(item.enclosure?.['@_length']),
   }));
 
   return { podcast, episodes };
+}
+
+/**
+ * Read `enclosure/@length`. Feeds routinely set this to 0, an empty string, or a
+ * non-numeric placeholder, so anything that is not a positive integer becomes
+ * undefined rather than a bogus 0-byte size.
+ */
+function parseEnclosureLength(raw: unknown): number | undefined {
+  if (raw == null) return undefined;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  return Math.round(n);
 }

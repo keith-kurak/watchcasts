@@ -8,6 +8,7 @@ import {
   addToDownloads,
   addToWatchList,
   getCachedEpisodes,
+  getDownloadedSizeBytes,
   getDownloadItem,
   getDownloads,
   getSubscriptions,
@@ -39,6 +40,12 @@ export interface EnrichedDownloadItem {
   status: DownloadStatus;
   localPath?: string;
   progress?: number;
+  /**
+   * Bytes the episode audio occupies. For a completed phone download this is the
+   * real file size; otherwise it is the size the feed declares, which may be
+   * absent. Undefined means "unknown", and the row shows nothing.
+   */
+  sizeBytes?: number;
 }
 
 export function useDownloadsQuery(subscriptions: Podcast[]) {
@@ -59,6 +66,7 @@ export function useDownloadsQuery(subscriptions: Podcast[]) {
           podcast,
           status: di.status,
           localPath: di.localPath,
+          sizeBytes: getDownloadedSizeBytes(di.episodeGuid) ?? episode.sizeBytes,
         });
       }
       return items;
@@ -130,6 +138,8 @@ export function useWatchListQuery(subscriptions: Podcast[]) {
           episode,
           podcast,
           status: 'pending',
+          // Feed-declared: the file lives on the watch, not here.
+          sizeBytes: episode.sizeBytes,
         });
       }
       return items;

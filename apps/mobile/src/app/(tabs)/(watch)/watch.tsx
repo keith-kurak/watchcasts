@@ -10,7 +10,7 @@ import { ThemedView } from '@/components/themed-view';
 import { NowPlayingBarHeight, Spacing } from '@/constants/theme';
 import { useScrollToActiveDownload } from '@/hooks/use-scroll-to-active-download';
 import { useTheme } from '@/hooks/use-theme';
-import { formatDate, formatDuration } from '@/lib/format';
+import { formatBytes, formatDate, formatDuration } from '@/lib/format';
 import { useWatchListQuery, useWatchListMutations, type EnrichedDownloadItem } from '@/lib/queries';
 import { getSubscriptions } from '@/lib/storage';
 import { getConnectedNodes, sendForceDownload, requestWatchDownloadStatus } from '@/hooks/useWearDataLayer';
@@ -83,6 +83,12 @@ const WatchRow = memo(function WatchRow({
           {item.episode.duration && (
             <ThemedText type="small" themeColor="textSecondary">
               {formatDuration(item.episode.duration)}
+            </ThemedText>
+          )}
+          {/* Pushed to the far right of the meta row, level with the date and duration. */}
+          {formatBytes(item.sizeBytes) !== '' && (
+            <ThemedText type="small" themeColor="textSecondary" style={styles.sizeText}>
+              {formatBytes(item.sizeBytes)}
             </ThemedText>
           )}
         </View>
@@ -244,6 +250,12 @@ const styles = StyleSheet.create({
   episodeMeta: {
     flexDirection: 'row',
     gap: Spacing.three,
+  },
+  sizeText: {
+    // Takes the remaining width so the size sits against the right edge whatever
+    // else the meta row happens to be showing.
+    flex: 1,
+    textAlign: 'right',
   },
   progressTrack: {
     height: 3,

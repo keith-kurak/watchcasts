@@ -109,6 +109,25 @@ Episodes whose cached episode record cannot be found are skipped. The payload ca
 
 `triggerSync()` fires on every watch-list add and remove.
 
+### The phone caps what it will queue
+
+`WatchToggle` refuses to add an episode when the watch storage limit is on and the queue has
+already reached it. `getWatchLimitState()` in `apps/mobile/src/lib/storage.ts` sums the
+**feed-declared** `enclosure/@length` of every queued episode — the phone cannot see the watch's
+filesystem, so this is an estimate, not a measurement.
+
+Two consequences worth knowing:
+
+- Feeds that omit the length, or publish `length="0"` (audioboom does), contribute **zero** to the
+  total. A queue of such episodes never trips the limit.
+- The limit is **soft** and **phone-side only**. Nothing is sent to the watch, the watch does not
+  enforce it, and going over never deletes anything — it only refuses the next add. The watch will
+  still download everything already in the list.
+
+The contract is unchanged: `SyncedSettings` does not carry the limit, so the watch has no knowledge
+of it. Enforcing on the watch instead would require the limit in all three mirrored contract files
+plus `EpisodeDownloadWorker`. See **K20**.
+
 ### When the watch receives it
 
 Three entry points call `SyncedWatchEpisodes.update(json)`:
@@ -493,8 +512,11 @@ Open defects. Each is a real, reproducible cause of user-visible breakage.
 | # | Issue | Effect |
 |---|---|---|
 | K9 | `HttpURLConnection` will not follow HTTP↔HTTPS redirects. Podcast prefix URLs redirect constantly. | The redirect page is written and renamed to `.mp3`. A tiny, broken file looks complete. |
+| K20 | The watch storage limit is enforced only on the phone, against feed-declared enclosure sizes. The watch neither receives nor enforces it. | The limit is an estimate. Feeds publishing `length="0"` count as zero, so a queue of them never trips it, and the watch will fill up regardless of the setting. |
 
-K9 is deferred as T2, and disappears if T1 (OkHttp) lands first.
+K9 is deferred as T2, and disappears if T1 (OkHttp) lands first. K20 is a deliberate scope choice —
+enforcing on the watch means changing `SyncedSettings` in all three mirrored contract files plus
+`EpisodeDownloadWorker`.
 
 ### Documentation drift
 
@@ -517,6 +539,19 @@ duplication).
 ## 8. Change log
 
 Newest first. Add an entry whenever sync behavior changes.
+
+### 2026-08-05 — phone-side watch storage limit
+
+Adds **K20**. No contract change: `SyncedSettings` is untouched and the watch is unaware of the limit.
+
+- `Episode.sizeBytes` now carries `enclosure/@length` from the feed. `parseEnclosureLength` in
+  `lib/rss.ts` rejects anything that is not a positive integer, so `length="0"` becomes `undefined`
+  rather than a bogus zero.
+- `getWatchLimitState()` sums those sizes across the stored watch list. `WatchToggle` refuses to add
+  when the limit is on and the total has reached it.
+- Cached episodes from before this change have no `sizeBytes` until their feed is refetched, so the
+  estimate reads low until then.
+- The watch tab shows each episode's feed-declared size. Rows whose feed omits it show nothing.
 
 ### 2026-08-04 — durable removal from the watch
 

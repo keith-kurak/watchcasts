@@ -10,7 +10,7 @@ import { NowPlayingBarHeight, Spacing } from '@/constants/theme';
 import { useScrollToActiveDownload } from '@/hooks/use-scroll-to-active-download';
 import { useTheme } from '@/hooks/use-theme';
 import { useDownloadContext } from '@/lib/download-context';
-import { formatDate, formatDuration } from '@/lib/format';
+import { formatBytes, formatDate, formatDuration } from '@/lib/format';
 import { useDownloadsQuery, type EnrichedDownloadItem } from '@/lib/queries';
 import { getSubscriptions } from '@/lib/storage';
 
@@ -67,6 +67,12 @@ function DownloadRow({ item }: { item: EnrichedDownloadItem }) {
           {item.episode.duration && (
             <ThemedText type="small" themeColor="textSecondary">
               {formatDuration(item.episode.duration)}
+            </ThemedText>
+          )}
+          {/* Pushed to the far right of the meta row, level with the date and duration. */}
+          {formatBytes(item.sizeBytes) !== '' && (
+            <ThemedText type="small" themeColor="textSecondary" style={styles.sizeText}>
+              {formatBytes(item.sizeBytes)}
             </ThemedText>
           )}
         </View>
@@ -154,6 +160,12 @@ const styles = StyleSheet.create({
   episodeMeta: {
     flexDirection: 'row',
     gap: Spacing.three,
+  },
+  sizeText: {
+    // Takes the remaining width so the size sits against the right edge whatever
+    // else the meta row happens to be showing.
+    flex: 1,
+    textAlign: 'right',
   },
   progressTrack: {
     height: 3,
