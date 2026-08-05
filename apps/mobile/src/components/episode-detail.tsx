@@ -1,5 +1,7 @@
 import BottomSheetComponent, { BottomSheetView } from '@expo/ui/community/bottom-sheet';
 import { Slider } from '@expo/ui/community/slider';
+import { Host, Slider as ComposeSlider } from '@expo/ui/jetpack-compose';
+import { fillMaxWidth } from '@expo/ui/jetpack-compose/modifiers';
 import { useAudioPlayerStatus } from 'expo-audio';
 import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
@@ -17,6 +19,10 @@ import { formatDate, formatDuration, parseDurationToSeconds, stripHtml } from '@
 import { useIsInDownloads } from '@/lib/queries';
 import { getCachedEpisodes, getPlaybackProgress, getSubscriptions } from '@/lib/storage';
 import type { Episode, Podcast } from '@/lib/types';
+
+// Shared height for the slider and the buttons beside it, so their centre lines
+// match. 48 keeps the play button at the minimum touch target size.
+const SliderRowHeight = 48;
 
 function formatSeconds(s: number): string {
   const h = Math.floor(s / 3600);
@@ -56,7 +62,6 @@ export function EpisodeDetail({ episodeId, podcastId }: EpisodeDetailProps) {
   const savedProgress = !isThisEpisode ? getPlaybackProgress(episode.guid) : null;
   const activeDuration = isThisEpisode && status.duration > 0 ? status.duration : episodeDuration;
   const currentTime = isThisEpisode ? status.currentTime : (savedProgress?.position ?? 0);
-  const progress = activeDuration > 0 ? currentTime / activeDuration : 0;
 
   const isDownloaded = downloadItem?.status === 'complete';
   const canPlay = isDownloaded || isThisEpisode;
@@ -98,7 +103,6 @@ export function EpisodeDetail({ episodeId, podcastId }: EpisodeDetailProps) {
         {(canPlay || episode.audioUrl) && (
           <PlaybackControls
             isPlaying={isPlaying}
-            progress={progress}
             currentTime={currentTime}
             duration={activeDuration}
             onPlayPause={handlePlayPause}
@@ -128,7 +132,6 @@ function formatRate(rate: number): string {
 
 function PlaybackControls({
   isPlaying,
-  progress,
   currentTime,
   duration,
   onPlayPause,
@@ -139,7 +142,6 @@ function PlaybackControls({
   disabled,
 }: {
   isPlaying: boolean;
-  progress: number;
   currentTime: number;
   duration: number;
   onPlayPause: () => void;
@@ -149,9 +151,13 @@ function PlaybackControls({
   theme: ReturnType<typeof useTheme>;
   disabled?: boolean;
 }) {
-  const progressBarWidth = useRef<number>(0);
   const sheetRef = useRef<BottomSheetComponent>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
+  // While the thumb is held, `scrubTime` overrides the live playback position so
+  // incoming status updates don't yank the thumb back under the finger.
+  const [scrubTime, setScrubTime] = useState<number | null>(null);
+  const scrubTimeRef = useRef<number>(0);
+  const displayTime = scrubTime ?? currentTime;
 
   const handleSpeedPress = useCallback(() => {
     setSheetOpen(true);
@@ -177,40 +183,37 @@ function PlaybackControls({
 
       {duration > 0 && (
         <View style={styles.progressContainer}>
-          <Pressable
-            style={styles.progressBarOuter}
-            onPress={(e) => {
-              const x = e.nativeEvent.locationX;
-              if (progressBarWidth.current > 0) {
-                const seekTime = (x / progressBarWidth.current) * duration;
-                onSeek(Math.max(0, Math.min(seekTime, duration)));
-              }
-            }}
-            onLayout={(e) => {
-              progressBarWidth.current = e.nativeEvent.layout.width;
-            }}>
-            <View
-              style={[
-                styles.progressBarTrack,
-                { backgroundColor: theme.backgroundElement },
-              ]}>
-              <View
-                style={[
-                  styles.progressBarFill,
-                  {
-                    backgroundColor: theme.text,
-                    width: `${Math.min(progress * 100, 100)}%`,
-                  },
-                ]}
-              />
-            </View>
-          </Pressable>
+          <Host style={styles.sliderRow} useViewportSizeMeasurement>
+            <ComposeSlider
+              min={0}
+              max={duration}
+              value={Math.min(displayTime, duration)}
+              enabled={!disabled}
+              colors={{
+                thumbColor: theme.text,
+                activeTrackColor: theme.text,
+                inactiveTrackColor: theme.backgroundElement,
+              }}
+              onValueChange={(value) => {
+                scrubTimeRef.current = value;
+                setScrubTime(value);
+              }}
+              onValueChangeFinished={() => {
+                const target = Math.max(0, Math.min(scrubTimeRef.current, duration));
+                // Hold `scrubTime` across the seek. Clearing it first would show
+                // the pre-seek position for a frame, which reads as a flash.
+                setScrubTime(target);
+                onSeek(target).finally(() => setScrubTime(null));
+              }}
+              modifiers={[fillMaxWidth()]}
+            />
+          </Host>
           <View style={styles.timeRow}>
             <ThemedText type="small" themeColor="textSecondary">
-              {formatSeconds(currentTime)}
+              {formatSeconds(displayTime)}
             </ThemedText>
             <ThemedText type="small" themeColor="textSecondary">
-              -{formatSeconds(Math.max(0, duration - currentTime))}
+              -{formatSeconds(Math.max(0, duration - displayTime))}
             </ThemedText>
           </View>
         </View>
@@ -292,24 +295,27 @@ const styles = StyleSheet.create({
   },
   controls: {
     flexDirection: 'row',
-    alignItems: 'center',
+    // Top-aligned, not centered: the progress column is taller than the buttons
+    // because of the time row below it. Centering the column would push the
+    // slider above the buttons. Each child is SliderRowHeight tall instead, so
+    // all three centre lines land together on the slider.
+    alignItems: 'flex-start',
     gap: Spacing.three,
   },
   playButton: {
     width: 48,
-    height: 48,
-    borderRadius: 24,
+    height: SliderRowHeight,
     justifyContent: 'center',
     alignItems: 'center',
   },
   speedButton: {
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    height: SliderRowHeight,
     justifyContent: 'center',
     alignItems: 'center',
   },
   speedButtonText: {
-    fontSize: 14,
+    fontSize: 17,
     fontWeight: '600',
   },
   sheetContent: {
@@ -329,18 +335,9 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: Spacing.one,
   },
-  progressBarOuter: {
-    height: 24,
+  sliderRow: {
+    height: SliderRowHeight,
     justifyContent: 'center',
-  },
-  progressBarTrack: {
-    height: 4,
-    borderRadius: 2,
-    overflow: 'hidden',
-  },
-  progressBarFill: {
-    height: '100%',
-    borderRadius: 2,
   },
   timeRow: {
     flexDirection: 'row',
