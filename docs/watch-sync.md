@@ -130,6 +130,38 @@ Three entry points call `SyncedWatchEpisodes.update(json)`:
 - **`downloadProgress`** — `100` if a local file exists, else the previous value, else `0`
 - **`error`** — **not carried over.** Always resets to `false`
 - **Removed episodes** — their audio file, their artwork (if unshared), and their `PlaybackState` entry are all deleted
+- **Tombstoned episodes** — skipped entirely, however the phone lists them (see below)
+
+### Removal is owned by the watch
+
+The phone owns the queue, but *removal* is the one action the watch will not let the phone
+undo. "Remove from watch" is a strong statement, and treating it as a hint produced a bad
+sequence in the field: the episode vanished, came back as `waiting-wifi` a few minutes later,
+and then downloaded itself again on reconnect.
+
+Two independent ways the request gets lost:
+
+1. The phone is out of Bluetooth range.
+2. The phone is in range with its app **closed**. The handler is a JS listener in
+   `WatchStatusProvider`, so it only runs while the phone app is open. Nothing wakes it.
+
+`SyncedWatchEpisodes.removedGuids` closes both. A removal writes a persisted tombstone, and:
+
+| Mechanism | Effect |
+|---|---|
+| `update()` skips tombstoned guids | No sync and no replayed DataItem can restore the episode |
+| `PhoneRequests.resendPendingRemovals()` | Re-asks the phone on every list arrival and every app open |
+| `update()` prunes tombstones absent from the incoming list | The phone dropping the episode *is* the acknowledgement |
+
+Absence from the list is used as the ack deliberately. An explicit ack would mean a fourth
+message path across three hand-mirrored contract files, for information the list already
+carries.
+
+Pruning is what keeps a tombstone from becoming permanent. Without it, deliberately re-adding
+the same episode from the phone later would be silently ignored forever.
+
+**Known trade-off:** a watch whose phone app is never opened again keeps its tombstones
+indefinitely. They are small, and the alternative is resurrecting episodes the user deleted.
 
 ---
 
@@ -139,6 +171,7 @@ Three entry points call `SyncedWatchEpisodes.update(json)`:
 |---|---|---|
 | Subscription list | `SyncedSubscriptions` | **No** — memory only |
 | Watch episode list | `SharedPreferences("watch-episodes")` via `SyncedWatchEpisodes` | Yes |
+| Pending removals | same, under `removedGuids` | Yes |
 | Download progress | same | Yes, throttled to every 5% |
 | Download error flag | same | Yes |
 | Downloaded audio | `<filesDir>/episodes/<guid>.mp3` | Yes, on disk |
@@ -378,6 +411,11 @@ Downloading is automatic. The only manual download action is retrying a failure.
 - **Long-press** it to open a menu with **Retry download** and **Cancel**
 - Retry calls `SyncedWatchEpisodes.clearError(guid)`, persists, then enqueues the worker
 
+The dialog holds a **snapshot** of the episode, not a `guid` it re-looks-up in `episodes`.
+Removing takes the episode out of the list immediately, so a lookup went `null` while the
+dialog was still animating out — which rendered the "not downloaded yet / Retry download"
+variant for a frame on the way past. Visibility is now its own flag.
+
 Tapping a non-downloaded episode does nothing. It used to enqueue a download and show a
 "Downloading…" toast that lied whenever `KEEP` discarded the request.
 
@@ -447,6 +485,8 @@ Open defects. Each is a real, reproducible cause of user-visible breakage.
 | ~~K12~~ | Tapping an episode enqueued a download it could not prioritize, behind a toast that lied | Phase 3 |
 | ~~K16~~ | All downloads ran over the Bluetooth companion proxy at a few hundred kbit/s. The proxy reports `NOT_METERED`, so the `UNMETERED` constraint was satisfied and the worker crawled instead of stalling | High-bandwidth network |
 | ~~K17~~ | `POST_NOTIFICATIONS` was declared but never requested, so the foreground service ran with its notification suppressed. Phase 2 verified `isForeground=true`, which does not imply a visible notification | High-bandwidth network |
+| ~~K18~~ | Removing on the watch was fire-and-forget. A lost request — phone out of range, or in range with its app closed — meant the next sync restored the episode and downloaded it again | Durable removal |
+| ~~K19~~ | The long-press dialog looked its episode up by guid, so removing it flashed the "not downloaded / Retry" variant during the exit animation | Durable removal |
 
 ### Medium — correctness
 
@@ -477,6 +517,42 @@ duplication).
 ## 8. Change log
 
 Newest first. Add an entry whenever sync behavior changes.
+
+### 2026-08-04 — durable removal from the watch
+
+Fixes **K18** and **K19**, both found in field testing.
+
+- `SyncedWatchEpisodes` persists `removedGuids` alongside the episode list. `update()` skips
+  any tombstoned guid, so no phone sync and no replayed DataItem can restore an episode the
+  user deleted on the watch.
+- `PhoneRequests.resendPendingRemovals()` re-asks the phone on every list arrival and every
+  app open. Needed because the phone's handler is a JS listener that only runs while its app
+  is open — an in-range phone with a closed app silently dropped the request.
+- `update()` prunes tombstones the phone no longer lists. That absence is the ack, and the
+  pruning is what lets the user deliberately re-add the same episode later.
+- The long-press dialog now holds an episode snapshot with its own visibility flag, instead
+  of looking the episode up by guid. Removing no longer flashes the "Retry download" variant
+  while the dialog animates out.
+
+Verified end to end on the Wear emulator against the phone emulator, isolating each half:
+
+1. With the **phone app force-stopped**, removed "Episode 784: The Cave" (`163093572`).
+   Tombstone written, `.mp3` deleted, request sent into the void.
+2. Force-stopped and relaunched the watch app. Log shows `Read existing watch episodes from
+   Data Layer` — the phone's DataItem still listed the episode — and the list stayed at 8
+   with the guid absent. No download ran and no file reappeared. This is the field bug, now
+   not reproducing.
+3. Started the phone app. The watch logged `Re-sending 1 unacknowledged removal(s)`; the phone
+   logged `Watch asked to remove episode 163093572` then `Watch episodes synced to Data
+   Layer`; the watch logged `Live data change: watch episodes updated`.
+4. `removedGuids` back to `[]` — pruned once the phone stopped listing it.
+
+Also on the phone: the app now opens on Subscriptions. `unstable_settings.anchor` alone did
+not do it — verified by pointing the anchor at `(watch)` and watching the app still open on
+Phone. Four tab groups each had an `index.tsx`, so all four matched `/` and the
+alphabetically first won. `(downloads)`, `(watch)` and `(settings)` now use named anchor
+routes, leaving `(subscriptions)/index.tsx` as the only owner of `/`. All four tabs and a
+push into an episode detail were re-checked.
 
 ### 2026-08-04 — high-bandwidth network, and a visible download
 

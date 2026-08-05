@@ -15,7 +15,7 @@ import { useWatchListQuery, useWatchListMutations, type EnrichedDownloadItem } f
 import { getSubscriptions } from '@/lib/storage';
 import { getConnectedNodes, sendForceDownload, requestWatchDownloadStatus } from '@/hooks/useWearDataLayer';
 import { useWatchStatuses } from '@/lib/watch-status-context';
-import type { WatchEpisodeStatus } from '../../modules/wear-data-layer/src';
+import type { WatchEpisodeStatus } from '../../../../modules/wear-data-layer/src';
 
 /** Minimum time the refresh spinner stays visible, so it does not just flicker. */
 const MIN_SPINNER_MS = 600;

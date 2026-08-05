@@ -158,6 +158,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
                         DataLayerContract.PATH_WATCH_EPISODES -> {
                             Log.d(TAG, "Read existing watch episodes from Data Layer")
                             SyncedWatchEpisodes.update(json)
+                            PhoneRequests.resendPendingRemovals(this@MainActivity)
                             WatchDownloadStatusReporter.reportStatus(this@MainActivity)
                             enqueueDownloads()
                         }
@@ -185,6 +186,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
                 DataLayerContract.PATH_WATCH_EPISODES -> {
                     Log.d(TAG, "Live data change: watch episodes updated")
                     SyncedWatchEpisodes.update(json)
+                    PhoneRequests.resendPendingRemovals(this@MainActivity)
                     WatchDownloadStatusReporter.reportStatus(this@MainActivity)
                     enqueueDownloads()
                 }
@@ -234,13 +236,16 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
  */
 @Composable
 private fun EpisodeActionsDialog(
+    visible: Boolean,
     episode: WatchEpisode?,
     onDismiss: () -> Unit,
     onRetry: () -> Unit,
     onRemove: () -> Unit,
 ) {
     val isDownloaded = episode?.localPath != null
-    Dialog(showDialog = episode != null, onDismissRequest = onDismiss) {
+    // Visibility is its own flag, not `episode != null`. The caller keeps the episode around
+    // after acting on it so the exit animation renders the state the user actually saw.
+    Dialog(showDialog = visible, onDismissRequest = onDismiss) {
         Alert(
             title = {
                 Text(
@@ -459,20 +464,24 @@ fun EpisodeListScreen(
     // Recomputed whenever the setting changes or the list recomposes. Good enough for a
     // status hint; the UNMETERED constraint is what actually gates the download.
     val waitingForWifi = wifiOnly && SyncedSettings.isWaitingForWifi(context)
-    // Guid of the episode whose long-press menu is open, if any.
-    var menuGuid by remember { mutableStateOf<String?>(null) }
-    val menuEpisode = episodes.firstOrNull { it.guid == menuGuid }
+    // The episode whose long-press menu is open, held as a snapshot rather than looked up
+    // from `episodes` by guid. Removing an episode takes it out of the list immediately, and
+    // a lookup would go null while the dialog is still animating out — which rendered the
+    // "not downloaded yet / Retry download" variant for a frame on the way past.
+    var menuEpisode by remember { mutableStateOf<WatchEpisode?>(null) }
+    var menuVisible by remember { mutableStateOf(false) }
 
     EpisodeActionsDialog(
+        visible = menuVisible,
         episode = menuEpisode,
-        onDismiss = { menuGuid = null },
+        onDismiss = { menuVisible = false },
         onRetry = {
             menuEpisode?.let { retryEpisodeDownload(context, it) }
-            menuGuid = null
+            menuVisible = false
         },
         onRemove = {
             menuEpisode?.let { removeEpisodeFromWatch(context, it.guid) }
-            menuGuid = null
+            menuVisible = false
         },
     )
 
@@ -522,7 +531,10 @@ fun EpisodeListScreen(
                                     // the toast said otherwise. Downloading is automatic;
                                     // the only manual action is retrying a failure.
                                     onClick = { if (isDownloaded) onEpisodeClick(episode) },
-                                    onLongClick = { menuGuid = episode.guid },
+                                    onLongClick = {
+                                        menuEpisode = episode
+                                        menuVisible = true
+                                    },
                                 ),
                         ) {
                             val artworkModel = episode.artworkPath?.let { File(it) }

@@ -37,6 +37,9 @@ class DataLayerListenerService : WearableListenerService() {
                     // fresh process that state only exists on disk.
                     SyncedWatchEpisodes.load(applicationContext)
                     SyncedWatchEpisodes.update(json)
+                    // A list just arrived, so the phone is reachable. Good moment to retry
+                    // any removal it has not acknowledged.
+                    PhoneRequests.resendPendingRemovals(applicationContext)
                     WatchDownloadStatusReporter.reportStatus(applicationContext)
                     // Automatic and frequent — every watch-list change on the phone
                     // lands here. Not worth expedited quota.
