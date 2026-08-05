@@ -39,6 +39,7 @@ data class WatchEpisode(
 object SyncedWatchEpisodes {
     private const val PREFS_NAME = "watch-episodes"
     private const val KEY_EPISODES = "episodes"
+    private const val KEY_REMOVED = "removedGuids"
 
     /** While a download runs, write progress to disk at most every this many percent. */
     private const val PROGRESS_PERSIST_STEP = 5
@@ -64,6 +65,26 @@ object SyncedWatchEpisodes {
      * callbacks mutate it from the main thread.
      */
     private val lastPersistedProgress = ConcurrentHashMap<String, Int>()
+
+    /**
+     * Episodes the user removed on the watch, which the phone has not yet acknowledged.
+     *
+     * A removal is a strong statement: the episode must stay gone. But the phone owns the
+     * queue, so its next list still contains the episode until it processes the request —
+     * and that request can be lost outright, because the phone's handler lives in its JS
+     * app and only runs while that app is open.
+     *
+     * These tombstones make the removal stick anyway. [update] filters them out of any
+     * incoming list, so no sync and no replayed DataItem can resurrect the episode, and
+     * [PhoneRequests.resendPendingRemovals] keeps asking until the phone complies.
+     *
+     * Persisted, because the whole point is surviving process death and reconnection.
+     */
+    private val removedGuids = mutableSetOf<String>()
+
+    /** Removals still waiting on the phone. Snapshot — safe to iterate. */
+    val pendingRemovals: Set<String>
+        @Synchronized get() = removedGuids.toSet()
 
     private val _episodes = MutableStateFlow<List<WatchEpisode>>(emptyList())
     val episodes: StateFlow<List<WatchEpisode>> = _episodes.asStateFlow()
@@ -104,6 +125,16 @@ object SyncedWatchEpisodes {
         init(context)
         if (loaded) return
         loaded = true
+
+        // Restored before the early return below: a watch can have pending removals and no
+        // stored episode list at the same time, and dropping them would let the phone's
+        // next sync bring the episodes back.
+        prefs?.getString(KEY_REMOVED, null)?.let { rawRemoved ->
+            val removedArray = JSONArray(rawRemoved)
+            for (i in 0 until removedArray.length()) {
+                removedArray.optString(i, "").takeIf { it.isNotBlank() }?.let(removedGuids::add)
+            }
+        }
 
         val raw = prefs?.getString(KEY_EPISODES, null) ?: return
         hasStoredList = true
@@ -174,7 +205,12 @@ object SyncedWatchEpisodes {
         val p = prefs ?: return
         val array = JSONArray()
         for (episode in _episodes.value) array.put(episode.toStoredJson())
-        p.edit().putString(KEY_EPISODES, array.toString()).apply()
+        val removed = JSONArray()
+        for (guid in removedGuids) removed.put(guid)
+        p.edit()
+            .putString(KEY_EPISODES, array.toString())
+            .putString(KEY_REMOVED, removed.toString())
+            .apply()
         hasStoredList = true
     }
 
@@ -184,10 +220,17 @@ object SyncedWatchEpisodes {
         val existing = _episodes.value.associateBy { it.guid }
         val list = mutableListOf<WatchEpisode>()
         val newGuids = mutableSetOf<String>()
+        val incomingGuids = mutableSetOf<String>()
+        val tombstoned = pendingRemovals
         val array = JSONArray(json)
         for (i in 0 until array.length()) {
             val obj = array.optJSONObject(i) ?: continue
             val guid = obj.optString("guid", "")
+            incomingGuids.add(guid)
+            // A removal made on the watch outranks the phone's list until the phone
+            // acknowledges it. Without this, the next sync — or a DataItem replayed on
+            // reconnect — silently restores the episode and downloads it all over again.
+            if (guid in tombstoned) continue
             newGuids.add(guid)
             val prev = existing[guid]
             // Check in-memory state first, then fall back to checking disk
@@ -232,6 +275,36 @@ object SyncedWatchEpisodes {
             lastPersistedProgress.remove(guid)
         }
         _episodes.value = list
+        // The phone has honoured every removal it no longer lists, so stop tracking those.
+        // Holding them forever would also block the user deliberately re-adding the same
+        // episode from the phone later.
+        forgetConfirmedRemovals(incomingGuids)
+        persist()
+    }
+
+    /**
+     * Drop tombstones for episodes the phone has stopped sending.
+     *
+     * Absence from the incoming list is the phone's acknowledgement. There is no explicit
+     * ack message, and adding one would mean a fourth path across three hand-mirrored
+     * contract files for information the list already carries.
+     */
+    @Synchronized
+    private fun forgetConfirmedRemovals(incomingGuids: Set<String>) {
+        removedGuids.retainAll(incomingGuids)
+    }
+
+    /**
+     * Record a removal and write it to disk immediately.
+     *
+     * Persisted here rather than relying on the caller, because [removeEpisode] returns
+     * early when the episode is not in this process's list — and that early return is
+     * exactly the case where the tombstone matters most.
+     */
+    @Synchronized
+    private fun rememberRemoval(guid: String) {
+        if (guid.isBlank()) return
+        if (!removedGuids.add(guid)) return
         persist()
     }
 
@@ -280,13 +353,15 @@ object SyncedWatchEpisodes {
     }
 
     /**
-     * Drop an episode locally, freeing its files.
+     * Drop an episode locally, freeing its files, and remember that it must stay gone.
      *
-     * Optimistic: the phone owns the queue, so this exists to make removal feel immediate
-     * rather than waiting on a round trip. If the phone never receives the request, its
-     * next sync puts the episode back — the same reconciliation [update] already does.
+     * Removing on the watch is a strong statement, so it is recorded as a tombstone in
+     * [removedGuids] rather than treated as a hint. The phone still owns the queue and is
+     * asked to do the same, but until it complies the tombstone keeps its list from
+     * restoring the episode. See [pendingRemovals].
      */
     fun removeEpisode(guid: String) {
+        rememberRemoval(guid)
         val episode = _episodes.value.firstOrNull { it.guid == guid } ?: return
         episode.localPath?.let { File(it).delete() }
         episodesDir?.let { File(it, "$guid.mp3.tmp").delete() }

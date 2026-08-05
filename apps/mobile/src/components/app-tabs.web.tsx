@@ -19,11 +19,19 @@ export default function AppTabs() {
       <TabSlot style={{ height: '100%' }} />
       <TabList asChild>
         <CustomTabList>
-          <TabTrigger name="(queue)" href="/" asChild>
-            <TabButton>Queue</TabButton>
-          </TabTrigger>
-          <TabTrigger name="(subscriptions)" href="/(subscriptions)" asChild>
+          {/* Mirrors the four groups in app-tabs.tsx. `(subscriptions)` owns `/`; the
+              others carry a named anchor route, so their paths are explicit. */}
+          <TabTrigger name="(subscriptions)" href="/" asChild>
             <TabButton>Subscriptions</TabButton>
+          </TabTrigger>
+          <TabTrigger name="(watch)" href="/watch" asChild>
+            <TabButton>Watch</TabButton>
+          </TabTrigger>
+          <TabTrigger name="(downloads)" href="/downloads" asChild>
+            <TabButton>Phone</TabButton>
+          </TabTrigger>
+          <TabTrigger name="(settings)" href="/settings" asChild>
+            <TabButton>Settings</TabButton>
           </TabTrigger>
         </CustomTabList>
       </TabList>
