@@ -219,7 +219,7 @@ export default function SettingsScreen() {
         <StorageLimitRow
           icon={{ ios: 'iphone', android: 'smartphone' }}
           title="Limit phone storage"
-          description="Don't download anymore podcasts once this limit is reached."
+          description="Don't download any more podcasts once this limit is reached."
           enabled={phoneLimitOn}
           limitBytes={phoneLimitBytes}
           usedBytes={phoneUsed}
