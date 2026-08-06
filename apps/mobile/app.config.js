@@ -32,10 +32,8 @@ module.exports = ({ config }) => ({
   android: {
     package: APPLICATION_ID,
     adaptiveIcon: {
-      backgroundColor: "#E6F4FE",
-      foregroundImage: "./assets/images/android-icon-foreground.png",
-      backgroundImage: "./assets/images/android-icon-background.png",
-      monochromeImage: "./assets/images/android-icon-monochrome.png",
+      backgroundColor: "#E4F0FE",
+      foregroundImage: "./assets/images/android-icon-foreground.png"
     },
     predictiveBackGestureEnabled: false,
   },

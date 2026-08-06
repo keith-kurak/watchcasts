@@ -230,7 +230,7 @@ export default function SettingsScreen() {
         <StorageLimitRow
           icon={{ ios: 'applewatch', android: 'watch' }}
           title="Limit watch storage"
-          description="Estimated from published size, so total on your watch may differ."
+          description="Measured on your watch once downloaded. Episodes still queued are estimated from the size the podcast publishes."
           enabled={watchLimitOn}
           limitBytes={watchLimitBytes}
           usedBytes={watchQueued}

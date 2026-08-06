@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Mirrors android.adaptiveIcon.backgroundColor in apps/mobile/app.config.js.
+  Keep the two in step so the phone and watch apps look like one product.
+-->
 <resources>
-    <color name="ic_launcher_background">#208AEF</color>
+    <color name="ic_launcher_background">#E4F0FE</color>
 </resources>

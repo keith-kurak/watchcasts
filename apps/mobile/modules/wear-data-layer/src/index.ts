@@ -13,6 +13,12 @@ export interface WatchEpisodeStatus {
    */
   status: "pending" | "downloading" | "complete" | "error" | "waiting-wifi";
   progress: number;
+  /**
+   * Measured size of the file on the watch, in bytes. 0 means unknown — either the
+   * download has not finished, or the watch build predates this field. Callers should
+   * fall back to the feed-declared size rather than treating 0 as "no space used".
+   */
+  sizeBytes: number;
 }
 
 type WearDataLayerModuleEvents = {

@@ -33,6 +33,12 @@ const WatchRow = memo(function WatchRow({
   const theme = useTheme();
   const status = watchStatus?.status ?? 'pending';
   const progress = watchStatus?.progress ?? 0;
+  // What the watch measured beats what the feed claimed. Falls back to the feed size
+  // until the download finishes, and for watch builds that do not report a size.
+  const displaySize =
+    watchStatus?.sizeBytes && watchStatus.sizeBytes > 0
+      ? watchStatus.sizeBytes
+      : item.sizeBytes;
   const isDownloading = status === 'downloading';
 
   return (
@@ -86,9 +92,9 @@ const WatchRow = memo(function WatchRow({
             </ThemedText>
           )}
           {/* Pushed to the far right of the meta row, level with the date and duration. */}
-          {formatBytes(item.sizeBytes) !== '' && (
+          {formatBytes(displaySize) !== '' && (
             <ThemedText type="small" themeColor="textSecondary" style={styles.sizeText}>
-              {formatBytes(item.sizeBytes)}
+              {formatBytes(displaySize)}
             </ThemedText>
           )}
         </View>

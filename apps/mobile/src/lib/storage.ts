@@ -12,6 +12,7 @@ const PHONE_LIMIT_ON_KEY = 'phoneStorageLimitEnabled';
 const PHONE_LIMIT_BYTES_KEY = 'phoneStorageLimitBytes';
 const WATCH_LIMIT_ON_KEY = 'watchStorageLimitEnabled';
 const WATCH_LIMIT_BYTES_KEY = 'watchStorageLimitBytes';
+const WATCH_REPORTED_SIZES_KEY = 'watchReportedSizes';
 
 function episodesKey(podcastId: string) {
   return `episodes:${podcastId}`;
@@ -234,14 +235,67 @@ export function getPhoneUsedBytes(): number {
 }
 
 /**
- * Total feed-declared bytes of every episode queued for the watch. An estimate:
- * episodes whose feed omits a size count as zero, so the real watch usage can be
- * higher than this. Erring toward letting a download through beats blocking one
- * that would have fit.
+ * Sizes the watch has measured for its completed downloads, keyed by episode guid.
+ *
+ * Persisted rather than kept in the status context: the watch limit is checked from
+ * `WatchToggle` through plain storage calls, which cannot read React state — and the
+ * numbers must survive an app restart or the watch being out of range.
+ */
+export function getWatchReportedSizes(): Record<string, number> {
+  const raw = Storage.getItemSync(WATCH_REPORTED_SIZES_KEY);
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw) as Record<string, number>;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Merge in sizes from a watch status report. Merged, not replaced: a report only covers
+ * what the watch currently has queued, and a zero means "not downloaded yet" or "old
+ * watch build" — neither should erase a size already measured.
+ */
+export function mergeWatchReportedSizes(sizes: Record<string, number>): void {
+  const current = getWatchReportedSizes();
+  let changed = false;
+  for (const [guid, size] of Object.entries(sizes)) {
+    if (size > 0 && current[guid] !== size) {
+      current[guid] = size;
+      changed = true;
+    }
+  }
+  // Drop guids no longer on the watch list so the map cannot grow without bound.
+  const queued = new Set(getWatchList().map((w) => w.episodeGuid));
+  for (const guid of Object.keys(current)) {
+    if (!queued.has(guid)) {
+      delete current[guid];
+      changed = true;
+    }
+  }
+  if (changed) {
+    Storage.setItemSync(WATCH_REPORTED_SIZES_KEY, JSON.stringify(current));
+  }
+}
+
+/**
+ * Total bytes of every episode queued for the watch.
+ *
+ * Prefers the size the watch measured for a completed download, and falls back to the
+ * size the feed declared for anything not yet downloaded. Still an estimate at the
+ * margin: an episode that is queued but not downloaded, from a feed that omits
+ * `enclosure/@length` (audioboom publishes `length="0"`), counts as zero. Erring toward
+ * letting a download through beats blocking one that would have fit.
  */
 export function getWatchQueuedBytes(): number {
+  const reported = getWatchReportedSizes();
   let total = 0;
   for (const item of getWatchList()) {
+    const measured = reported[item.episodeGuid];
+    if (measured > 0) {
+      total += measured;
+      continue;
+    }
     const episode = getCachedEpisodes(item.podcastId)?.find(
       (e) => e.guid === item.episodeGuid,
     );
