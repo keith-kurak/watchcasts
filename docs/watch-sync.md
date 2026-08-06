@@ -4,7 +4,7 @@ How the Podcatch phone app and the Wear OS app exchange data, and how the watch 
 
 > **Keep this current.** Any change to the Data Layer contract, the download worker, or watch-side state must be reflected here in the same commit. See [Change log](#change-log).
 >
-> **Status:** describes behavior as of 2026-08-04. The [Known issues](#known-issues) section lists defects that exist in the code today.
+> **Status:** describes behavior as of 2026-08-06. The [Known issues](#known-issues) section lists defects that exist in the code today.
 
 ---
 
@@ -59,6 +59,8 @@ A change to one without the others breaks sync **silently** — no compile error
 | `/podcatch/subscriptions` | `{ items, updatedAt }` | phone → watch |
 | `/podcatch/watch-episodes` | `{ items, updatedAt }` | phone → watch |
 | `/podcatch/settings` | `{ items, updatedAt }` | phone → watch |
+| `/podcatch/playback-progress/phone` | `{ items, updatedAt }` | phone → watch |
+| `/podcatch/playback-progress/watch` | `{ items, updatedAt }` | **watch → phone** |
 
 `items` is a JSON **string** under the DataMap key `items`. `updatedAt` is a long under `updatedAt`.
 
@@ -77,8 +79,12 @@ Messages are fire-and-forget. They are dropped if the peer is unreachable.
 `/podcatch/settings` carries settings the phone owns and the watch honours. Payload today:
 
 ```json
-{ "wifiOnlyDownloads": true }
+{ "wifiOnlyDownloads": true, "syncPlaybackProgress": true }
 ```
+
+`SyncedSettings.update` applies each field only when the payload carries it, so a phone
+build predating a field leaves the watch on its stored value. The two directions stay
+independently deployable.
 
 The watch stores it in `SharedPreferences("watch-settings")` via `SyncedSettings`, for the
 same reason the episode list is persisted — a worker can run in a fresh process. Its default
@@ -195,7 +201,7 @@ indefinitely. They are small, and the alternative is resurrecting episodes the u
 | Download error flag | same | Yes |
 | Downloaded audio | `<filesDir>/episodes/<guid>.mp3` | Yes, on disk |
 | Cached artwork | `<filesDir>/episodes/artwork/<hash>.img` | Yes, on disk |
-| Playback position | `SharedPreferences("playback")` via `PlaybackState` | Yes |
+| Playback position | `SharedPreferences("playback")` via `PlaybackState` | Yes, with an `updatedAt:` per guid — see [Playback progress sync](#7-playback-progress-sync) |
 
 Wear OS kills app processes aggressively, and WorkManager will start a fresh process to run
 a worker. **Treat process death as the normal case, not the exception.**
@@ -499,7 +505,144 @@ so a fresh process reports real state rather than nothing.
 
 ---
 
-## 7. Known issues
+## 7. Playback progress sync
+
+Both ways, so an episode continues on the other device from where you left it. Governed by
+the `syncPlaybackProgress` setting, default on.
+
+### Why DataItems and not messages
+
+The device you listened on is usually the one that is *not* connected — a watch on a run, a
+phone left at home. The position has to survive the disconnection and replicate on
+reconnect, which is exactly what a `DataItem` does and exactly what a message does not.
+
+**One path per writer.** Both nodes can write a `DataItem`, but two writers on one path
+means each overwrites the other's copy, and the loser's positions are gone before anyone
+merges them.
+
+### Payload
+
+Both paths carry the same array under `items`:
+
+```json
+[{ "guid": "…", "positionMs": 812000, "durationMs": 3600000, "updatedAt": 1754500000000 }]
+```
+
+Milliseconds on the wire in both directions. The watch works in milliseconds and the phone
+in seconds, so one side has to convert; naming a wire unit means it is always the same one.
+
+The phone sends progress **only for episodes on the watch list**. The watch has no use for
+the position of an episode it does not have, and the phone's full listening history grows
+without bound.
+
+### The merge rule
+
+`updatedAt` is a per-episode timestamp and is the entire conflict resolution rule. The
+DataMap's own `updatedAt` says when the *batch* was published and cannot settle a
+per-episode conflict.
+
+An incoming entry is applied when **all** of these hold:
+
+| Condition | Why |
+|---|---|
+| `syncPlaybackProgress` is on | Checked on send *and* on apply. Checking only on send leaves a device publishing positions the other has stopped asking for |
+| `positionMs > 0` | A zero is "no position recorded", not "start of the episode" |
+| The episode is **not playing** on the receiving device | Its position is advancing and is only written to storage every few seconds, so any stored value is stale by construction. Applying one would jump the audio the listener is hearing |
+| The incoming `updatedAt` is newer than the local one | Newest listener wins |
+
+**The incoming timestamp is stored as-is, never re-stamped.** Re-stamping would make the
+receiving device look like the more recent listener and push the same position straight
+back on its next publish.
+
+Two clocks are being compared, the phone's and the watch's. Wear OS keeps a paired watch
+synced to its phone, and the rule's real granularity is "which listening session happened
+later", so the residual skew does not matter.
+
+### Loaded but paused
+
+Skipping only the *playing* episode leaves a hole: a paused player still holds its old
+position in memory and writes it on pause and on teardown, with a newer timestamp — putting
+the old position straight back over the merged one.
+
+So the merge also moves the local player when the episode it applied to is the loaded one:
+
+| Side | Mechanism |
+|---|---|
+| Phone | `AudioProvider` calls `player.seekTo` on the merged position |
+| Watch | `PlaybackState.applyRemoteProgress` raises a `SeekRequest`; `PlaybackService` collects it and seeks |
+
+The watch needs the indirection because `PlaybackState` is a singleton with no handle on
+the ExoPlayer. The request is cleared whether or not it could be acted on — the merge is
+already durable in preferences, and a stale request would mask the next one.
+
+### Legacy positions
+
+Positions recorded before this feature have no `updatedAt`. Treating them as `0` would mean
+the first sync after upgrading rewound every episode to whatever the other device had. Both
+sides substitute a single stamped-once epoch instead — `playbackProgressEpoch` in the
+phone's kv-store, `legacyProgressEpoch` in the watch's `playback` preferences — so legacy
+entries are all older than anything recorded from now on and newer than nothing.
+
+### A save that records nothing must not re-stamp
+
+Both sides save a position on a timer — the phone every ~5 s while playing, the watch from
+its player screen's autosave. A save that writes the *same* position must not take a fresh
+`updatedAt`, or the device becomes the "most recent listener" for a position it may have
+just been handed by the other side, and pushes it straight back.
+
+Each side therefore skips the write when the position has moved less than a second:
+
+| Side | Guard |
+|---|---|
+| Phone | `saveProgress` compares against the stored progress. When it skips and the session is ending, it still publishes, so a move sitting behind the throttle is not lost |
+| Watch | `PlaybackState.savePosition` compares against the **persisted** position from preferences |
+
+The watch comparing against preferences rather than its in-memory map is load-bearing:
+`publishPosition` advances the in-memory value once a second to drive the UI *without*
+recording it, so comparing there makes every save look like a no-op and nothing persists at
+all.
+
+For the same reason `PlaybackProgressSync` publishes from
+`PlaybackState.savedProgressSnapshot()`, not from the live `progress` flow. The flow's
+position is up to a second ahead of its own timestamp, so publishing it sent a fresh
+position judged by a stale clock.
+
+Both defects were found on-device, not by reading the code — see the change log.
+
+### Publish triggers
+
+Throttled to one publish per 30 s on both sides. A save every few seconds during playback
+is not worth a `DataItem` put over the companion link, and nothing on the other side reacts
+to a position moving in real time. Anything that *ends* a listening session bypasses the
+throttle, since that is the position that matters.
+
+| Side | Throttled | Immediate |
+|---|---|---|
+| Phone | periodic save while playing | pause, switching episode, watch-list change, turning the setting on |
+| Watch | periodic save while playing | pause, service teardown, a merge that changed something, settings arriving with the setting on |
+
+The phone's throttle *trails* rather than drops: a pause landing inside the window is
+published when the window closes, instead of being the last event of the session and never
+sent.
+
+### Receive triggers
+
+| Side | Entry point |
+|---|---|
+| Watch | `DataLayerListenerService.onDataChanged`, `MainActivity.onDataChanged`, `MainActivity.onResume` → `getDataItems()` |
+| Phone | `WearDataLayerModule.onDataChanged`, plus a `getDataItems()` read when JS starts observing |
+
+The phone side is the first `DataClient` listener that module has ever had; before this it
+only listened for messages. Both phone entry points filter to the **watch's** path — the
+Data Layer delivers a node its own writes back, and the phone must not re-apply its own.
+
+The `getDataItems()` read matters more than the live listener. The normal sequence is that
+the watch recorded a position while the phone app was closed, so the item is already sitting
+replicated when it next opens.
+
+---
+
+## 8. Known issues
 
 Open defects. Each is a real, reproducible cause of user-visible breakage.
 
@@ -531,6 +674,7 @@ Open defects. Each is a real, reproducible cause of user-visible breakage.
 | K9 | `HttpURLConnection` will not follow HTTP↔HTTPS redirects. Podcast prefix URLs redirect constantly. | The redirect page is written and renamed to `.mp3`. A tiny, broken file looks complete. |
 | K20 | The watch storage limit is enforced only on the phone. The watch neither receives nor enforces it. | Going over blocks the next add on the phone, but nothing stops the watch downloading what is already queued. |
 | K21 | Only a **completed** download has a measured size. A queued-but-not-downloaded episode still falls back to the feed, and audioboom publishes `length="0"`. | Such an episode counts as zero until it finishes. The running total is right for space already used, and can undercount what is still incoming. |
+| K22 | Progress sync is governed only by the phone's setting. The watch has no UI to change it, so a watch whose phone app is never opened keeps whatever it last received. | Matches how `wifiOnlyDownloads` already works — the phone owns settings — but means the setting cannot be turned off from the watch alone. |
 
 K9 is deferred as T2, and disappears if T1 (OkHttp) lands first.
 
@@ -560,9 +704,77 @@ duplication).
 
 ---
 
-## 8. Change log
+## 9. Change log
 
 Newest first. Add an entry whenever sync behavior changes.
+
+### 2026-08-06 — playback progress sync
+
+New setting **Sync latest progress**, default on, and a listen position exchanged both
+ways. Adds **K22**. **Contract change: both apps must be rebuilt.**
+
+- Two new `DataItem` paths, one per writer: `/podcatch/playback-progress/phone` and
+  `/podcatch/playback-progress/watch`. Mirrored into all three contract files. Payload is
+  `[{ guid, positionMs, durationMs, updatedAt }]`, milliseconds in both directions.
+- `SyncedSettings` gains `syncPlaybackProgress`. Both sides check it before publishing and
+  before applying. `SyncedSettings.update` now applies each field only when the payload
+  carries it, so the two sides stay independently deployable.
+- Merge is newest-wins on the per-episode `updatedAt`, and never touches an episode that is
+  **playing** on the receiving device. The incoming timestamp is stored as-is; re-stamping
+  would push the same position straight back.
+- A loaded-but-paused player is seeked onto the merged position, or its own pause and
+  teardown writes would put the old one back. The watch does it through a new
+  `PlaybackState.seekRequest` that `PlaybackService` collects.
+- New `PlaybackProgressSync` on the watch; new `lib/playback-sync.ts` on the phone. Both
+  throttle to one publish per 30 s, with session-ending events bypassing the throttle.
+- `WearDataLayerModule` gains its first `DataClient` listener, plus a `getDataItems()` read
+  at subscribe time — the usual case is a position recorded while the phone app was closed.
+- Positions predating this change have no timestamp. Both sides substitute a stamped-once
+  epoch rather than `0`, so upgrading does not rewind them.
+- `publishSettings()` on the phone now assembles the whole settings payload from storage.
+  The item is replaced wholesale, so a caller sending only the field it changed would reset
+  the others.
+
+- A save that records no new position no longer re-stamps `updatedAt`. Both sides save on a
+  timer, and re-stamping an unchanged position makes a device the most recent listener for
+  a position it was just given. See [A save that records nothing must not
+  re-stamp](#a-save-that-records-nothing-must-not-re-stamp).
+
+Verified end to end on the Wear emulator (`emulator-5556`) against the phone emulator
+(`emulator-5554`), both dev builds, with an NPR News Now episode queued to the watch:
+
+1. **Phone → watch.** Played on the phone and paused at 0:34. The watch's preferences held
+   `position=34827`, `duration=280058`, and `updatedAt` equal to the phone's timestamp —
+   confirming the stamp is stored as-is, not regenerated. Opening the episode on the watch
+   resumed from there rather than from zero.
+2. **Watch → phone.** Played on the watch to 2:16 and paused. The phone's episode screen
+   showed 2:16: the merge both wrote storage and seeked the loaded-but-paused player.
+3. **Playing is never overwritten.** With the phone playing, jumped the watch to 3:43 and
+   paused so it published a much later position. The phone kept advancing 2:38 → 2:58 and
+   never jumped.
+4. **Setting off.** Toggled off; the watch's `watch-settings` showed
+   `syncPlaybackProgress=false` with `wifiOnlyDownloads` preserved. The watch then played
+   to 3:54 and published nothing; the phone received nothing. Toggling back on made both
+   sides publish immediately.
+5. **Idle stability.** With both sides paused, neither timestamp moved for 95 s.
+
+Two defects were found this way and fixed before landing, neither visible from the code:
+
+- Applying a merge on the phone seeks the loaded player; that seek arrived as a status
+  update and the periodic save re-stamped the merged position, publishing an echo ~25 ms
+  later. Logs showed receive-then-publish pairs 25–89 ms apart.
+- The same re-stamp on the watch, driven by the player screen's autosave, made the two
+  sides re-send one stale position to each other every 30 s indefinitely. Observed directly
+  as the phone's `updatedAt` advancing by exactly 30000 ms while nothing was playing.
+
+The first fix, applied naively to the watch, then caused a third: comparing against the
+in-memory position defeated itself, because the UI ticker had already advanced it, so
+pausing stopped persisting entirely. The guard compares against preferences for that
+reason.
+
+Not exercised: a real disconnection. Both emulators were paired throughout, so the case the
+DataItem choice exists for — a position recorded while the peer is unreachable, replicating
+on reconnect — still needs a watch out of Bluetooth range.
 
 ### 2026-08-06 — the watch reports its measured download size
 

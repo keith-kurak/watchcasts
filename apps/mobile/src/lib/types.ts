@@ -38,6 +38,16 @@ export interface WatchItem {
 }
 
 export interface PlaybackProgress {
+  /** Seconds. The wire format for phone <-> watch sync is milliseconds. */
   position: number;
   duration: number;
+  /**
+   * When this position was recorded, in epoch milliseconds.
+   *
+   * Decides which side wins when the phone and the watch have both listened to the same
+   * episode. Absent on entries written before progress sync existed — `getPlaybackProgress`
+   * substitutes a single per-install epoch for those rather than leaving them at 0, which
+   * would let any watch position beat every position recorded before the upgrade.
+   */
+  updatedAt?: number;
 }

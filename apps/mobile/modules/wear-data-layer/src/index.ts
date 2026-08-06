@@ -21,10 +21,27 @@ export interface WatchEpisodeStatus {
   sizeBytes: number;
 }
 
+/** One episode's listen position as recorded by the watch. Milliseconds. */
+export interface WatchPlaybackProgress {
+  guid: string;
+  positionMs: number;
+  durationMs: number;
+  /** Epoch milliseconds. Decides which side wins when both have listened. */
+  updatedAt: number;
+}
+
 type WearDataLayerModuleEvents = {
   onWatchDownloadStatus: (event: { statuses: WatchEpisodeStatus[] }) => void;
   /** The watch asked for an episode to be dropped from the watch queue. */
   onWatchEpisodeRemoved: (event: { guid: string }) => void;
+  /**
+   * The watch published listen positions.
+   *
+   * Fires on a live change, and on demand via `requestWatchPlaybackProgress()` for
+   * whatever is already replicated — a position recorded while this app was closed
+   * arrives that way, and it is the common case.
+   */
+  onWatchPlaybackProgress: (event: { entries: WatchPlaybackProgress[] }) => void;
 };
 
 declare class WearDataLayerModule extends NativeModule<WearDataLayerModuleEvents> {
@@ -32,9 +49,18 @@ declare class WearDataLayerModule extends NativeModule<WearDataLayerModuleEvents
   syncWatchEpisodes(json: string): Promise<void>;
   /** Push app settings the watch also honours. Payload is a JSON `SyncedSettings`. */
   syncSettings(json: string): Promise<void>;
+  /** Publish this phone's listen positions. Payload is a JSON array of entries. */
+  syncPlaybackProgress(json: string): Promise<void>;
   sendForceDownload(): Promise<void>;
   getConnectedNodes(): Promise<WearNode[]>;
   requestWatchDownloadStatus(): Promise<void>;
+  /**
+   * Re-emit `onWatchPlaybackProgress` from the watch's already-replicated data item.
+   *
+   * Call it after subscribing. The listener only sees changes made while this app is
+   * running, and the usual case is a position the watch recorded while it was closed.
+   */
+  requestWatchPlaybackProgress(): Promise<void>;
 }
 
 export default requireNativeModule<WearDataLayerModule>("WearDataLayerModule");

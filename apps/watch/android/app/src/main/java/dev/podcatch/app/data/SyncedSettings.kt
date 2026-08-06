@@ -19,9 +19,16 @@ import org.json.JSONObject
 object SyncedSettings {
     private const val PREFS_NAME = "watch-settings"
     private const val KEY_WIFI_ONLY = "wifiOnlyDownloads"
+    private const val KEY_SYNC_PLAYBACK = "syncPlaybackProgress"
 
     /** Matches the phone's default. Episodes are large; metered data is not free. */
     private const val DEFAULT_WIFI_ONLY = true
+
+    /**
+     * Matches the phone's default. Continuing an episode on the other device is the
+     * reason the two apps are paired, so it is on unless someone turns it off.
+     */
+    private const val DEFAULT_SYNC_PLAYBACK = true
 
     private var prefs: SharedPreferences? = null
 
@@ -30,6 +37,11 @@ object SyncedSettings {
 
     private val _wifiOnlyDownloads = MutableStateFlow(DEFAULT_WIFI_ONLY)
     val wifiOnlyDownloads: StateFlow<Boolean> = _wifiOnlyDownloads.asStateFlow()
+
+    private val _syncPlaybackProgress = MutableStateFlow(DEFAULT_SYNC_PLAYBACK)
+
+    /** Keep listen positions the same on this watch and the phone. */
+    val syncPlaybackProgress: StateFlow<Boolean> = _syncPlaybackProgress.asStateFlow()
 
     @Synchronized
     fun load(context: Context) {
@@ -43,16 +55,30 @@ object SyncedSettings {
         loaded = true
         _wifiOnlyDownloads.value =
             prefs?.getBoolean(KEY_WIFI_ONLY, DEFAULT_WIFI_ONLY) ?: DEFAULT_WIFI_ONLY
+        _syncPlaybackProgress.value =
+            prefs?.getBoolean(KEY_SYNC_PLAYBACK, DEFAULT_SYNC_PLAYBACK) ?: DEFAULT_SYNC_PLAYBACK
     }
 
-    /** Apply a settings payload pushed from the phone. */
+    /**
+     * Apply a settings payload pushed from the phone.
+     *
+     * Each field is applied only when the payload actually carries it. A phone build
+     * predating a field simply leaves this watch on its own stored value, which is what
+     * lets the two sides be deployed independently.
+     */
     fun update(json: String?) {
         if (json == null) return
         val obj = JSONObject(json)
-        if (!obj.has(KEY_WIFI_ONLY)) return
-        val value = obj.optBoolean(KEY_WIFI_ONLY, DEFAULT_WIFI_ONLY)
-        _wifiOnlyDownloads.value = value
-        prefs?.edit()?.putBoolean(KEY_WIFI_ONLY, value)?.apply()
+        if (obj.has(KEY_WIFI_ONLY)) {
+            val value = obj.optBoolean(KEY_WIFI_ONLY, DEFAULT_WIFI_ONLY)
+            _wifiOnlyDownloads.value = value
+            prefs?.edit()?.putBoolean(KEY_WIFI_ONLY, value)?.apply()
+        }
+        if (obj.has(KEY_SYNC_PLAYBACK)) {
+            val value = obj.optBoolean(KEY_SYNC_PLAYBACK, DEFAULT_SYNC_PLAYBACK)
+            _syncPlaybackProgress.value = value
+            prefs?.edit()?.putBoolean(KEY_SYNC_PLAYBACK, value)?.apply()
+        }
     }
 
     /**

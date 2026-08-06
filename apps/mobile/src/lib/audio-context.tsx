@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query';
 import {
   createAudioPlayer,
   requestNotificationPermissionsAsync,
@@ -17,8 +18,25 @@ import {
 } from 'react';
 import { Platform } from 'react-native';
 
-import { getPlaybackProgress, setPlaybackProgress } from '@/lib/storage';
+import WearDataLayerModule, {
+  type WatchPlaybackProgress,
+} from '../../modules/wear-data-layer/src';
+import { publishPlaybackProgress } from '@/lib/playback-sync';
+import {
+  getPlaybackProgress,
+  mergeRemotePlaybackProgress,
+  setPlaybackProgress,
+} from '@/lib/storage';
 import type { Episode, Podcast } from '@/lib/types';
+
+const isAndroid = Platform.OS === 'android';
+
+/**
+ * Below this many seconds of movement, a save is treated as recording nothing new.
+ *
+ * Playback saves run every ~5s, so a genuine advance clears this comfortably.
+ */
+const UNCHANGED_POSITION_S = 1;
 
 interface NowPlaying {
   episode: Episode;
@@ -47,6 +65,7 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     createAudioPlayer(null, { updateInterval: 500 }),
   );
   const [nowPlaying, setNowPlaying] = useState<NowPlaying | null>(null);
+  const queryClient = useQueryClient();
   const [playbackRate, setPlaybackRateState] = useState(1);
   const playRetryRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -77,22 +96,86 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const saveProgress = useCallback(() => {
-    const ep = nowPlayingRef.current?.episode;
-    if (!ep || !player) return;
-    const pos = player.currentTime;
-    const dur = player.duration;
-    if (dur > 0) {
+  /**
+   * @param final the position just stopped moving — a pause, or switching episode. The
+   * watch gets it straight away instead of waiting out the publish throttle.
+   */
+  const saveProgress = useCallback(
+    ({ final = false } = {}) => {
+      const ep = nowPlayingRef.current?.episode;
+      if (!ep || !player) return;
+      const pos = player.currentTime;
+      const dur = player.duration;
+      if (dur <= 0) return;
+
+      const stored = getPlaybackProgress(ep.guid);
+      // A position that has not moved is not a new recording, and re-stamping it would
+      // make this phone the most recent listener for a position it may have just been
+      // given by the watch — which then pushes it straight back.
+      //
+      // Not hypothetical: applying a merge seeks the loaded player, that seek arrives as
+      // a status update, and this save then published an echo ~25ms later.
+      if (stored && Math.abs(stored.position - pos) < UNCHANGED_POSITION_S) {
+        // Still flush when the session is ending — the last real move may be sitting
+        // behind the publish throttle.
+        if (final) publishPlaybackProgress({ immediate: true });
+        return;
+      }
+
       setPlaybackProgress(ep.guid, { position: pos, duration: dur });
-    }
-  }, [player]);
+      publishPlaybackProgress({ immediate: final });
+    },
+    [player],
+  );
+
+  /**
+   * Apply listen positions the watch recorded.
+   *
+   * The episode playing right now is left alone — its position is advancing and is only
+   * written to storage every few seconds, so an incoming value would jump the audio out
+   * from under the listener. Anything else is merged newest-wins, and if the episode is
+   * loaded but paused the player is moved to match: otherwise the next save would write
+   * the player's old position back over the merged one.
+   */
+  useEffect(() => {
+    if (!isAndroid) return;
+
+    const subscription = WearDataLayerModule.addListener(
+      'onWatchPlaybackProgress',
+      (event: { entries: WatchPlaybackProgress[] }) => {
+        const applied = mergeRemotePlaybackProgress(
+          event.entries,
+          (guid) => player.playing && nowPlayingRef.current?.episode.guid === guid,
+        );
+        if (applied.length === 0) return;
+
+        const loadedGuid = nowPlayingRef.current?.episode.guid;
+        if (loadedGuid && applied.includes(loadedGuid)) {
+          const merged = getPlaybackProgress(loadedGuid);
+          if (merged) player.seekTo(merged.position);
+        }
+        // The played/in-progress icons read storage during render and have nothing to
+        // subscribe to, so a merged position stays invisible until something else
+        // re-renders the row. Invalidating the lists they sit in is that something.
+        queryClient.invalidateQueries({ queryKey: ['watchList'] });
+        queryClient.invalidateQueries({ queryKey: ['feed'] });
+      },
+    );
+
+    // Only after subscribing: this asks for whatever is already replicated, which is how
+    // a position the watch recorded while this app was closed gets applied.
+    WearDataLayerModule.requestWatchPlaybackProgress().catch(() => {});
+
+    return () => subscription.remove();
+  }, [player, queryClient]);
 
   const play = useCallback(
     async (episode: Episode, podcast: Podcast, localUri?: string) => {
       const uri = localUri ?? episode.audioUrl;
       if (!uri) return;
-      // Save progress of currently playing episode before switching
-      saveProgress();
+      // Save progress of currently playing episode before switching. Final: that episode
+      // is not going to move again, so the watch should hear about it now.
+      saveProgress({ final: true });
       clearPlayRetry();
       player.replace({ uri });
       // Resume from saved position if the episode was previously in progress
@@ -163,7 +246,7 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
       play,
       pause: () => {
         clearPlayRetry();
-        saveProgress();
+        saveProgress({ final: true });
         player.pause();
       },
       resume: () => {

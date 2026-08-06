@@ -19,12 +19,21 @@ export async function syncWatchEpisodes(
   await WearDataLayerModule.syncWatchEpisodes(JSON.stringify(episodes));
 }
 
-/** Push settings the watch also honours (currently Wi-Fi-only downloads). */
+/** Push settings the watch also honours. */
 export async function syncSettings(settings: {
   wifiOnlyDownloads: boolean;
+  syncPlaybackProgress: boolean;
 }): Promise<void> {
   if (!isAndroid) return;
   await WearDataLayerModule.syncSettings(JSON.stringify(settings));
+}
+
+/** Publish this phone's listen positions for the episodes queued on the watch. */
+export async function syncPlaybackProgress(
+  entries: unknown[],
+): Promise<void> {
+  if (!isAndroid) return;
+  await WearDataLayerModule.syncPlaybackProgress(JSON.stringify(entries));
 }
 
 /** Send a message to the watch to force-download any undownloaded episodes. */

@@ -19,9 +19,9 @@ import { StorageLimitRow } from '@/components/storage-limit-row';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors, NowPlayingBarHeight, Spacing } from '@/constants/theme';
-import { syncSettings } from '@/hooks/useWearDataLayer';
 import { useDownloadContext } from '@/lib/download-context';
 import { buildOpml, parseOpml } from '@/lib/opml';
+import { publishPlaybackProgress, publishSettings } from '@/lib/playback-sync';
 import { fetchFeed } from '@/lib/rss';
 import {
   addSubscription,
@@ -29,6 +29,7 @@ import {
   getPhoneStorageLimitEnabled,
   getPhoneUsedBytes,
   getSubscriptions,
+  getSyncPlaybackProgress,
   getWatchQueuedBytes,
   getWatchStorageLimitBytes,
   getWatchStorageLimitEnabled,
@@ -36,6 +37,7 @@ import {
   setCachedEpisodes,
   setPhoneStorageLimitBytes,
   setPhoneStorageLimitEnabled,
+  setSyncPlaybackProgress,
   setWatchStorageLimitBytes,
   setWatchStorageLimitEnabled,
   setWifiOnlyDownloads,
@@ -50,6 +52,7 @@ export default function SettingsScreen() {
   const [subscriptionCount, setSubscriptionCount] = useState(0);
   const [busy, setBusy] = useState<'import' | 'export' | null>(null);
   const [wifiOnly, setWifiOnly] = useState(getWifiOnlyDownloads);
+  const [syncProgress, setSyncProgress] = useState(getSyncPlaybackProgress);
   const [phoneLimitOn, setPhoneLimitOn] = useState(getPhoneStorageLimitEnabled);
   const [phoneLimitBytes, setPhoneLimitBytes] = useState(getPhoneStorageLimitBytes);
   const [watchLimitOn, setWatchLimitOn] = useState(getWatchStorageLimitEnabled);
@@ -93,10 +96,22 @@ export default function SettingsScreen() {
     setWifiOnlyDownloads(enabled);
     // The watch enforces this itself via its WorkManager constraint, so it needs
     // its own copy. Fire and forget — it re-syncs whenever the watch reconnects.
-    syncSettings({ wifiOnlyDownloads: enabled }).catch(() => {});
+    publishSettings();
     // Turning the restriction off should release anything it was holding, rather
     // than leave it waiting for a network change that already happened.
     if (!enabled) drainPendingDownloads();
+  }
+
+  function handleSyncProgressChange(enabled: boolean) {
+    setSyncProgress(enabled);
+    setSyncPlaybackProgress(enabled);
+    // Both sides check this before sending and before applying, so the watch needs
+    // its own copy — otherwise it would keep publishing positions this phone has
+    // stopped asking for.
+    publishSettings();
+    // Turning it on should not wait for the next episode to be played. Publish what
+    // this phone already knows, so the watch can catch up straight away.
+    if (enabled) publishPlaybackProgress({ immediate: true });
   }
 
   async function handleExport() {
@@ -207,6 +222,31 @@ export default function SettingsScreen() {
             </ThemedText>
           </View>
           <Switch value={wifiOnly} onValueChange={handleWifiOnlyChange} />
+        </View>
+
+        <ThemedText
+          type="smallBold"
+          themeColor="textSecondary"
+          style={[styles.sectionTitle, styles.sectionSpacing]}>
+          PLAYBACK
+        </ThemedText>
+
+        <View style={[styles.row, { backgroundColor: colors.backgroundElement }]}>
+          <View style={styles.rowIcon}>
+            <SymbolView
+              name={{ ios: 'arrow.trianglehead.2.clockwise', android: 'sync' }}
+              size={24}
+              tintColor={colors.text}
+            />
+          </View>
+          <View style={styles.rowText}>
+            <ThemedText style={styles.rowTitle}>Sync latest progress</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              Pick up on your watch where you left off on your phone, and the other way
+              around. An episode that is playing right now is never moved.
+            </ThemedText>
+          </View>
+          <Switch value={syncProgress} onValueChange={handleSyncProgressChange} />
         </View>
 
         <ThemedText
