@@ -9,7 +9,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.keithkurak.watchcasts"  // MUST match the phone app
+        applicationId = "com.keithkurak.tinypodcatcher"  // MUST match the phone app
         minSdk = 33                          // Wear OS 4.0 (Android 13)
         targetSdk = 35
         versionCode = 1

@@ -1,10 +1,10 @@
 {
-  "name": "watchcasts-watch",
+  "name": "@podcatch/watch",
   "version": "1.0.0",
   "private": true,
   "scripts": {
     "install-debug": "./install.sh",
-    "build-apk": "EAS_DANGEROUS_OVERRIDE_ANDROID_APPLICATION_ID=com.keithkurak.watchcasts eas build --profile preview-watch --platform android"
+    "build-apk": "EAS_DANGEROUS_OVERRIDE_ANDROID_APPLICATION_ID=com.keithkurak.tinypodcatcher eas build --profile preview-watch --platform android"
   },
   "dependencies": {
     "expo": "^57.0.7"

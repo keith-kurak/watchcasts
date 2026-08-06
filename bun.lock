@@ -54,7 +54,7 @@
       },
     },
     "apps/watch": {
-      "name": "watchcasts-watch",
+      "name": "@podcatch/watch",
       "version": "1.0.0",
       "dependencies": {
         "expo": "^57.0.7",
@@ -348,6 +348,8 @@
     "@podcatch/mobile": ["@podcatch/mobile@workspace:apps/mobile"],
 
     "@podcatch/shared": ["@podcatch/shared@workspace:packages/shared"],
+
+    "@podcatch/watch": ["@podcatch/watch@workspace:apps/watch"],
 
     "@radix-ui/primitive": ["@radix-ui/primitive@1.1.5", "", {}, "sha512-d86WIWFYNtGA0H/d8exstrTRTp7eWJYlYJbtNofxr/3ljupZYn6EFDG/Qgu/0Kc8v7yMUxySagqJsL1+PdYjWg=="],
 
@@ -1588,8 +1590,6 @@
     "walker": ["walker@1.0.8", "", { "dependencies": { "makeerror": "1.0.12" } }, "sha512-ts/8E8l5b7kY0vlWLewOkDXMmPdLcVV4GmOQLyxuSswIJsweeFZtAsMF7k1Nszz+TYBQrlYRmzOnr398y1JemQ=="],
 
     "warn-once": ["warn-once@0.1.1", "", {}, "sha512-VkQZJbO8zVImzYFteBXvBOZEl1qL175WH8VmZcxF2fZAoudNhNDvHi+doCaAEdU2l2vtcIwa2zn0QK5+I1HQ3Q=="],
-
-    "watchcasts-watch": ["watchcasts-watch@workspace:apps/watch"],
 
     "wcwidth": ["wcwidth@1.0.1", "", { "dependencies": { "defaults": "^1.0.3" } }, "sha512-XHPEwS0q6TaxcvG85+8EYkbiCux2XtWG2mkc47Ng2A77BQu9+DqIOJldST4HgPkuea7dvKSj5VgX3P1d4rW8Tg=="],
 

@@ -27,8 +27,8 @@ Per variant:
 
 | Variant | applicationId |
 |---|---|
-| dev | `com.keithkurak.watchcasts.dev` |
-| prod | `com.keithkurak.watchcasts` |
+| dev | `com.keithkurak.tinypodcatcher.dev` |
+| prod | `com.keithkurak.tinypodcatcher` |
 
 The phone side sets this in `apps/mobile/app.config.js`. The watch side uses `applicationIdSuffix = "dev"` on its debug build type in `apps/watch/android`. A dev phone build cannot pair with a prod watch build.
 

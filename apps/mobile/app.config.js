@@ -5,13 +5,13 @@
 // AND the same signing key. The watch app's applicationId is set in
 // apps/watch/gradle.properties with an `applicationIdSuffix = "dev"` on its
 // debug build type. Both sides must resolve to the same package per variant:
-//   dev:  com.keithkurak.watchcasts.dev
-//   prod: com.keithkurak.watchcasts
+//   dev:  com.keithkurak.tinypodcatcher.dev
+//   prod: com.keithkurak.tinypodcatcher
 // ─────────────────────────────────────────────────────────────────────────────
 const IS_DEV = (process.env.APP_VARIANT ?? "development") === "development";
 const APPLICATION_ID = IS_DEV
-  ? "com.keithkurak.watchcasts.dev"
-  : "com.keithkurak.watchcasts";
+  ? "com.keithkurak.tinypodcatcher.dev"
+  : "com.keithkurak.tinypodcatcher";
 
 module.exports = ({ config }) => ({
   ...config,
