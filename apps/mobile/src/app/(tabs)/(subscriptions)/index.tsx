@@ -3,7 +3,15 @@ import { FloatingActionButton, Host, Icon } from '@expo/ui/jetpack-compose';
 import { Image } from 'expo-image';
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Pressable, StyleSheet, useColorScheme, useWindowDimensions, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  StyleSheet,
+  useColorScheme,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -15,6 +23,7 @@ import {
   setSubscriptionsViewMode,
   type SubscriptionsViewMode,
 } from '@/lib/storage';
+import { subscribeToStarterPodcasts } from '@/lib/starter-podcasts';
 import type { Podcast } from '@/lib/types';
 
 /** Colors.light and Colors.dark are const-asserted to different literal types. */
@@ -33,6 +42,7 @@ export default function SubscriptionsScreen() {
 
   const [podcasts, setPodcasts] = useState<Podcast[]>([]);
   const [viewMode, setViewMode] = useState<SubscriptionsViewMode>(getSubscriptionsViewMode);
+  const [addingStarters, setAddingStarters] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -43,6 +53,24 @@ export default function SubscriptionsScreen() {
   function handleViewModeChange(mode: SubscriptionsViewMode) {
     setViewMode(mode);
     setSubscriptionsViewMode(mode);
+  }
+
+  async function handleAddStarters() {
+    setAddingStarters(true);
+    try {
+      const { added, failed } = await subscribeToStarterPodcasts();
+      setPodcasts(getSubscriptions());
+      // Silent on a clean run — the shows appearing is the confirmation. Only speak up
+      // when something is missing, so the user is not left wondering.
+      if (failed.length > 0) {
+        Alert.alert(
+          added > 0 ? 'Added some of them' : 'Could not add them',
+          `${failed.join(', ')} could not be fetched. Check your connection and try again.`,
+        );
+      }
+    } finally {
+      setAddingStarters(false);
+    }
   }
 
   // Tiles are square, so the row height is the cell width. Worked out here rather than
@@ -115,9 +143,11 @@ export default function SubscriptionsScreen() {
           )
         }
         ListEmptyComponent={
-          <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
-            No subscriptions yet. Tap + to add a podcast.
-          </ThemedText>
+          <EmptyState
+            busy={addingStarters}
+            colors={colors}
+            onAddStarters={handleAddStarters}
+          />
         }
       />
 
@@ -143,6 +173,45 @@ export default function SubscriptionsScreen() {
         </FloatingActionButton>
       </Host>
     </ThemedView>
+  );
+}
+
+/**
+ * Shown when nothing is subscribed yet.
+ *
+ * The FAB is the real way to add a podcast, but it demands a feed URL to hand — which is
+ * a lot to ask of someone who just wants to see what the app does. The link fills the app
+ * with a few shows so every other screen has something in it.
+ */
+function EmptyState({
+  busy,
+  colors,
+  onAddStarters,
+}: {
+  busy: boolean;
+  colors: ThemeColors;
+  onAddStarters: () => void;
+}) {
+  return (
+    <View style={styles.empty}>
+      <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
+        No subscriptions yet. Tap + to add a podcast.
+      </ThemedText>
+      {busy ? (
+        <View style={styles.starterLink}>
+          <ActivityIndicator size="small" color={colors.textSecondary} />
+        </View>
+      ) : (
+        <Pressable
+          onPress={onAddStarters}
+          accessibilityRole="button"
+          style={({ pressed }) => [styles.starterLink, pressed && styles.pressed]}>
+          <ThemedText type="small" style={styles.starterLinkText}>
+            Add some good ones to try things out
+          </ThemedText>
+        </Pressable>
+      )}
+    </View>
   );
 }
 
@@ -242,7 +311,26 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  empty: {
+    alignItems: 'center',
+  },
   emptyText: {
+    textAlign: 'center',
+  },
+  starterLink: {
+    marginTop: Spacing.three,
+    // Padding rather than margin: it is the touch target, and a line of small text is
+    // well under the 48dp minimum on its own.
+    paddingVertical: Spacing.two,
+    paddingHorizontal: Spacing.three,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  starterLinkText: {
+    fontWeight: '600',
+    // The palette has no accent colour, so the underline is what makes this read as
+    // something you can tap rather than a second line of help text.
+    textDecorationLine: 'underline',
     textAlign: 'center',
   },
   pressed: {
