@@ -10,7 +10,7 @@ android {
 
     defaultConfig {
         applicationId = "com.keithkurak.watchcasts"  // MUST match the phone app
-        minSdk = 30                          // Wear OS 3.0
+        minSdk = 33                          // Wear OS 4.0 (Android 13)
         targetSdk = 35
         versionCode = 1
         versionName = "1.0.0"
