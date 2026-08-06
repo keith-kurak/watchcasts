@@ -23,6 +23,24 @@ export const DataPaths = {
   WATCH_EPISODES: "/podcatch/watch-episodes",
   /** App settings that both sides honour, synced phone -> watch. Payload: { items: Settings }. */
   SETTINGS: "/podcatch/settings",
+  /**
+   * Listen positions the phone has recorded, phone -> watch. Payload:
+   * `{ items: PlaybackProgressEntry[] }`.
+   *
+   * Deliberately a DataItem and not a message. The device you listened on is usually the
+   * one that is *not* connected — a watch on a run, a phone left at home — so the update
+   * has to survive the disconnection and replicate on reconnect.
+   */
+  PLAYBACK_PROGRESS_PHONE: "/podcatch/playback-progress/phone",
+  /**
+   * Listen positions the watch has recorded, watch -> phone. Same payload as
+   * [PLAYBACK_PROGRESS_PHONE].
+   *
+   * One path per writer rather than one shared path. Both nodes can write a DataItem, but
+   * two writers on one path means each overwrites the other's copy and the loser's
+   * positions are gone before anyone merges them.
+   */
+  PLAYBACK_PROGRESS_WATCH: "/podcatch/playback-progress/watch",
 } as const;
 
 /** MessageClient paths (fire-and-forget RPC — transient). */
@@ -60,6 +78,40 @@ export const DataKeys = {
 export interface SyncedSettings {
   /** Only download episodes over an unmetered network. Defaults to true. */
   wifiOnlyDownloads: boolean;
+  /**
+   * Keep the listen position of an episode the same on the phone and the watch.
+   * Defaults to true.
+   *
+   * Both sides honour it, and both sides check it before *publishing* as well as before
+   * applying. A device with it off neither sends nor accepts positions.
+   */
+  syncPlaybackProgress: boolean;
+}
+
+/**
+ * One episode's listen position, as carried by both PLAYBACK_PROGRESS paths.
+ *
+ * Milliseconds on the wire in both directions. The watch works in milliseconds and the
+ * phone in seconds, so one of them has to convert; picking a wire unit means it is always
+ * the same one.
+ */
+export interface PlaybackProgressEntry {
+  guid: string;
+  positionMs: number;
+  /** 0 when the device has not learned the episode's duration yet. */
+  durationMs: number;
+  /**
+   * When this position was recorded, in epoch milliseconds.
+   *
+   * This is the entire conflict resolution rule: on both sides, an incoming entry is
+   * applied only when it is newer than the local one. The DataMap's own `updatedAt` says
+   * when the *batch* was published and cannot decide a per-episode conflict.
+   *
+   * The two clocks are the phone's and the watch's. Wear OS keeps a paired watch's clock
+   * synced to its phone, so they agree closely enough for a rule whose granularity is
+   * "which listening session happened later".
+   */
+  updatedAt: number;
 }
 
 /** Advertised via CapabilityClient so each side can discover the other. */

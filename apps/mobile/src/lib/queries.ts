@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { syncWatchEpisodes } from '@/hooks/useWearDataLayer';
 
 import { useDownloadContext } from './download-context';
+import { publishPlaybackProgress } from './playback-sync';
 import { fetchFeed } from './rss';
 import {
   addToDownloads,
@@ -179,6 +180,10 @@ export function publishWatchList() {
     }];
   });
   syncWatchEpisodes(enriched).catch(() => {});
+  // The list just changed, so the set of episodes the watch cares about did too. An
+  // episode queued after being half-listened to on the phone should arrive with that
+  // position, not start from zero.
+  publishPlaybackProgress({ immediate: true });
 }
 
 export function useWatchListMutations() {

@@ -15,6 +15,10 @@ object DataLayerContract {
     const val PATH_SUBSCRIPTIONS = "/podcatch/subscriptions"
     const val PATH_WATCH_EPISODES = "/podcatch/watch-episodes"
     const val PATH_SETTINGS = "/podcatch/settings"
+    // Listen positions. One path per writer: two writers on one path would each
+    // overwrite the other's copy before anyone merged them.
+    const val PATH_PLAYBACK_PROGRESS_PHONE = "/podcatch/playback-progress/phone"
+    const val PATH_PLAYBACK_PROGRESS_WATCH = "/podcatch/playback-progress/watch"
     // MessageClient paths (transient RPC)
     const val PATH_REQUEST_SYNC = "/podcatch/request-sync"
     const val PATH_REQUEST_DOWNLOAD_STATUS = "/podcatch/request-download-status"

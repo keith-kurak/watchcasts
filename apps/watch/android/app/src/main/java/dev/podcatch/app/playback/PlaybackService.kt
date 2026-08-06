@@ -17,6 +17,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import dev.podcatch.app.data.PlaybackProgressSync
 
 class PlaybackService : MediaSessionService() {
 
@@ -57,9 +58,38 @@ class PlaybackService : MediaSessionService() {
         positionTicker = null
     }
 
+    /**
+     * Move the player onto a position that arrived from the phone.
+     *
+     * Only ever for an episode that is loaded and paused — [PlaybackState.applyRemoteProgress]
+     * never raises a request for one that is playing. Without this the merge would not
+     * survive: a paused player writes its own position on pause and on teardown, and that
+     * write is newer than the phone's, so it would put the old position straight back.
+     */
+    private fun observeSeekRequests() {
+        serviceScope.launch {
+            PlaybackState.seekRequest.collect { request ->
+                if (request == null) return@collect
+                val player = mediaSession?.player
+                val actionable = player != null &&
+                    !player.isPlaying &&
+                    player.currentMediaItem?.mediaId == request.guid
+                if (actionable) player!!.seekTo(request.positionMs)
+                // Cleared either way. The merge itself is already durable in prefs; this
+                // request only exists to correct a live player, and holding a stale one
+                // would block the next request from being noticed.
+                PlaybackState.clearSeekRequest()
+            }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         PlaybackState.init(this)
+        // Every durable position write reaches the phone. The publisher throttles, so a
+        // save every few seconds during playback does not become a put every few seconds.
+        PlaybackState.setOnProgressSaved { PlaybackProgressSync.publish(this) }
+        observeSeekRequests()
 
         val player = ExoPlayer.Builder(this)
             .setSeekForwardIncrementMs(30_000L)
@@ -90,7 +120,27 @@ class PlaybackService : MediaSessionService() {
 
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
                         PlaybackState.setPlaying(isPlaying)
-                        if (isPlaying) startPositionTicker() else stopPositionTicker()
+                        if (isPlaying) {
+                            startPositionTicker()
+                        } else {
+                            stopPositionTicker()
+                            // Pausing ends a listening session. Save and publish it now:
+                            // the ViewModel also saves on pause, but it is gone as soon
+                            // as you navigate away from the player screen.
+                            val guid = PlaybackState.currentGuid
+                            val player = mediaSession?.player
+                            if (guid != null && player != null) {
+                                PlaybackState.savePosition(
+                                    guid,
+                                    player.currentPosition,
+                                    player.duration.coerceAtLeast(0L),
+                                )
+                                PlaybackProgressSync.publish(
+                                    this@PlaybackService,
+                                    force = true,
+                                )
+                            }
+                        }
                     }
 
                     override fun onPlaybackStateChanged(playbackState: Int) {
@@ -133,7 +183,6 @@ class PlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         stopPositionTicker()
-        serviceScope.cancel()
         // Save position on service destroy
         mediaSession?.player?.let { player ->
             val guid = PlaybackState.currentGuid
@@ -143,9 +192,14 @@ class PlaybackService : MediaSessionService() {
                     player.currentPosition,
                     player.duration.coerceAtLeast(0L),
                 )
+                // The listening session just ended, so this is the position that matters.
+                // Bypass the throttle rather than let it be the one update that is lost.
+                PlaybackProgressSync.publish(this, force = true)
             }
             player.release()
         }
+        PlaybackState.setOnProgressSaved(null)
+        serviceScope.cancel()
         mediaSession?.release()
         mediaSession = null
         super.onDestroy()

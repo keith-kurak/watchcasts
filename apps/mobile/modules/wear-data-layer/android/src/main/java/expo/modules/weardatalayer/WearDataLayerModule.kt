@@ -1,6 +1,10 @@
 package expo.modules.weardatalayer
 
 import android.util.Log
+import com.google.android.gms.wearable.DataClient
+import com.google.android.gms.wearable.DataEvent
+import com.google.android.gms.wearable.DataEventBuffer
+import com.google.android.gms.wearable.DataMapItem
 import com.google.android.gms.wearable.MessageClient
 import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.Node
@@ -10,26 +14,35 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.kotlin.Promise
 
-class WearDataLayerModule : Module(), MessageClient.OnMessageReceivedListener {
+class WearDataLayerModule :
+    Module(),
+    MessageClient.OnMessageReceivedListener,
+    DataClient.OnDataChangedListener {
     private var messageClient: MessageClient? = null
+    private var dataClient: DataClient? = null
 
     override fun definition() = ModuleDefinition {
         Name("WearDataLayerModule")
 
-        Events("onWatchDownloadStatus", "onWatchEpisodeRemoved")
+        Events("onWatchDownloadStatus", "onWatchEpisodeRemoved", "onWatchPlaybackProgress")
 
         OnStartObserving {
             val context = appContext.reactContext ?: return@OnStartObserving
             messageClient = Wearable.getMessageClient(context).also {
                 it.addListener(this@WearDataLayerModule)
             }
-            Log.d(TAG, "MessageClient listener registered")
+            dataClient = Wearable.getDataClient(context).also {
+                it.addListener(this@WearDataLayerModule)
+            }
+            Log.d(TAG, "MessageClient and DataClient listeners registered")
         }
 
         OnStopObserving {
             messageClient?.removeListener(this@WearDataLayerModule)
             messageClient = null
-            Log.d(TAG, "MessageClient listener removed")
+            dataClient?.removeListener(this@WearDataLayerModule)
+            dataClient = null
+            Log.d(TAG, "MessageClient and DataClient listeners removed")
         }
 
         AsyncFunction("syncSubscriptions") { json: String, promise: Promise ->
@@ -84,6 +97,28 @@ class WearDataLayerModule : Module(), MessageClient.OnMessageReceivedListener {
                 .addOnFailureListener { e ->
                     promise.reject("ERR", e.message ?: "putDataItem failed", e)
                 }
+        }
+
+        AsyncFunction("syncPlaybackProgress") { json: String, promise: Promise ->
+            val context = appContext.reactContext
+                ?: return@AsyncFunction promise.reject("ERR", "No context", null)
+            val dataClient = Wearable.getDataClient(context)
+            val request = PutDataMapRequest.create(PATH_PLAYBACK_PROGRESS_PHONE).apply {
+                dataMap.putString(KEY_ITEMS, json)
+                dataMap.putLong(KEY_UPDATED_AT, System.currentTimeMillis())
+            }.asPutDataRequest().setUrgent()
+            dataClient.putDataItem(request)
+                .addOnSuccessListener {
+                    Log.d(TAG, "Playback progress synced to Data Layer")
+                    promise.resolve(null)
+                }
+                .addOnFailureListener { e ->
+                    promise.reject("ERR", e.message ?: "putDataItem failed", e)
+                }
+        }
+
+        AsyncFunction("requestWatchPlaybackProgress") { promise: Promise ->
+            readReplicatedPlaybackProgress(promise)
         }
 
         AsyncFunction("sendForceDownload") { promise: Promise ->
@@ -178,6 +213,73 @@ class WearDataLayerModule : Module(), MessageClient.OnMessageReceivedListener {
         }
     }
 
+    override fun onDataChanged(events: DataEventBuffer) {
+        for (event in events) {
+            if (event.type != DataEvent.TYPE_CHANGED) continue
+            // Only the watch's path. The phone writes the other one, and Data Layer
+            // delivers a node its own writes back.
+            if (event.dataItem.uri.path != PATH_PLAYBACK_PROGRESS_WATCH) continue
+            val dataMap = DataMapItem.fromDataItem(event.dataItem).dataMap
+            emitPlaybackProgress(dataMap.getString(KEY_ITEMS), "live change")
+        }
+    }
+
+    /**
+     * Read the watch's progress item as it stands right now.
+     *
+     * The listener only covers changes that happen while this app is running, and the
+     * usual sequence is the opposite: the watch records a position while the phone app is
+     * closed, and the DataItem is already sitting replicated when it next opens.
+     *
+     * Called explicitly from JS rather than from `OnStartObserving`. That hook fires when
+     * the *first* listener for any of this module's events is added, which is not
+     * necessarily the progress one — the read would then race the subscription it is meant
+     * to feed.
+     */
+    private fun readReplicatedPlaybackProgress(promise: Promise) {
+        val context = appContext.reactContext
+            ?: return promise.reject("ERR", "No context", null)
+        Wearable.getDataClient(context).dataItems
+            .addOnSuccessListener { items ->
+                for (item in items) {
+                    if (item.uri.path != PATH_PLAYBACK_PROGRESS_WATCH) continue
+                    val dataMap = DataMapItem.fromDataItem(item).dataMap
+                    emitPlaybackProgress(dataMap.getString(KEY_ITEMS), "replicated item")
+                }
+                items.release()
+                promise.resolve(null)
+            }
+            .addOnFailureListener { e ->
+                Log.e(TAG, "Failed to read replicated playback progress", e)
+                promise.reject("ERR", e.message ?: "getDataItems failed", e)
+            }
+    }
+
+    private fun emitPlaybackProgress(json: String?, source: String) {
+        if (json == null) return
+        val entries = parseProgressJson(json)
+        if (entries.isEmpty()) return
+        Log.d(TAG, "Watch playback progress ($source): ${entries.size} episodes")
+        sendEvent("onWatchPlaybackProgress", mapOf("entries" to entries))
+    }
+
+    private fun parseProgressJson(json: String): List<Map<String, Any>> {
+        val array = org.json.JSONArray(json)
+        val result = mutableListOf<Map<String, Any>>()
+        for (i in 0 until array.length()) {
+            val obj = array.optJSONObject(i) ?: continue
+            val guid = obj.optString("guid", "")
+            if (guid.isEmpty()) continue
+            result.add(mapOf(
+                "guid" to guid,
+                "positionMs" to obj.optLong("positionMs", 0L),
+                "durationMs" to obj.optLong("durationMs", 0L),
+                "updatedAt" to obj.optLong("updatedAt", 0L),
+            ))
+        }
+        return result
+    }
+
     private fun parseStatusJson(json: String): List<Map<String, Any>> {
         val array = org.json.JSONArray(json)
         val result = mutableListOf<Map<String, Any>>()
@@ -208,6 +310,8 @@ class WearDataLayerModule : Module(), MessageClient.OnMessageReceivedListener {
         private const val PATH_REQUEST_DOWNLOAD_STATUS = "/podcatch/request-download-status"
         private const val PATH_WATCH_DOWNLOAD_STATUS = "/podcatch/watch-download-status"
         private const val PATH_REMOVE_WATCH_EPISODE = "/podcatch/remove-watch-episode"
+        private const val PATH_PLAYBACK_PROGRESS_PHONE = "/podcatch/playback-progress/phone"
+        private const val PATH_PLAYBACK_PROGRESS_WATCH = "/podcatch/playback-progress/watch"
         private const val KEY_ITEMS = "items"
         private const val KEY_UPDATED_AT = "updatedAt"
     }

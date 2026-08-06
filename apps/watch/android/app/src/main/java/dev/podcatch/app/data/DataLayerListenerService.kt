@@ -8,6 +8,7 @@ import com.google.android.gms.wearable.DataEventBuffer
 import com.google.android.gms.wearable.DataMapItem
 import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.WearableListenerService
+import dev.podcatch.app.playback.PlaybackState
 
 class DataLayerListenerService : WearableListenerService() {
 
@@ -30,6 +31,22 @@ class DataLayerListenerService : WearableListenerService() {
                     SyncedWatchEpisodes.load(applicationContext)
                     WatchDownloadStatusReporter.reportStatus(applicationContext)
                     enqueueDownloads(expedited = false, replaceExisting = true)
+                    // Progress sync may have just been turned on. Publishing here means
+                    // the phone gets this watch's positions without waiting for the next
+                    // time something is played.
+                    if (SyncedSettings.syncPlaybackProgress.value) {
+                        PlaybackState.init(applicationContext)
+                        PlaybackProgressSync.publish(applicationContext, force = true)
+                    }
+                }
+                DataLayerContract.PATH_PLAYBACK_PROGRESS_PHONE -> {
+                    Log.d(TAG, "Playback progress synced (updatedAt=$updatedAt)")
+                    // Both are read in a possibly fresh process: the setting decides
+                    // whether to apply at all, and PlaybackState holds what to merge
+                    // against.
+                    SyncedSettings.load(applicationContext)
+                    PlaybackState.init(applicationContext)
+                    PlaybackProgressSync.applyFromPhone(applicationContext, json)
                 }
                 DataLayerContract.PATH_WATCH_EPISODES -> {
                     Log.d(TAG, "Watch episodes synced (updatedAt=$updatedAt)")

@@ -1,6 +1,8 @@
 import { Directory, File, Paths } from 'expo-file-system';
 import { Storage } from 'expo-sqlite/kv-store';
 
+import type { PlaybackProgressEntry } from '@podcatch/shared';
+
 import type { DownloadItem, Episode, PlaybackProgress, Podcast, WatchItem } from './types';
 
 const SUBSCRIPTIONS_KEY = 'subscriptions';
@@ -13,6 +15,8 @@ const PHONE_LIMIT_BYTES_KEY = 'phoneStorageLimitBytes';
 const WATCH_LIMIT_ON_KEY = 'watchStorageLimitEnabled';
 const WATCH_LIMIT_BYTES_KEY = 'watchStorageLimitBytes';
 const WATCH_REPORTED_SIZES_KEY = 'watchReportedSizes';
+const SYNC_PLAYBACK_KEY = 'syncPlaybackProgress';
+const PLAYBACK_EPOCH_KEY = 'playbackProgressEpoch';
 
 function episodesKey(podcastId: string) {
   return `episodes:${podcastId}`;
@@ -351,15 +355,112 @@ function playbackKey(episodeGuid: string) {
   return `playback:${episodeGuid}`;
 }
 
+/**
+ * Timestamp substituted for progress entries written before sync existed.
+ *
+ * Those entries have no `updatedAt`, and treating them as 0 would mean the first sync
+ * after upgrading rewound every episode to whatever the watch had. Stamped once, the
+ * first time anything asks, so all legacy entries share one plausible recording time —
+ * older than anything recorded from now on, newer than nothing.
+ */
+function legacyProgressEpoch(): number {
+  const raw = Storage.getItemSync(PLAYBACK_EPOCH_KEY);
+  if (raw != null) return Number(raw);
+  const now = Date.now();
+  Storage.setItemSync(PLAYBACK_EPOCH_KEY, String(now));
+  return now;
+}
+
 export function getPlaybackProgress(episodeGuid: string): PlaybackProgress | null {
   const raw = Storage.getItemSync(playbackKey(episodeGuid));
   if (!raw) return null;
-  return JSON.parse(raw) as PlaybackProgress;
+  const progress = JSON.parse(raw) as PlaybackProgress;
+  return { ...progress, updatedAt: progress.updatedAt ?? legacyProgressEpoch() };
 }
 
+/**
+ * @param progress `updatedAt` is stamped with the current time when omitted. Pass it
+ * explicitly only when writing a position that came from the watch — keeping the watch's
+ * timestamp is what stops the same position bouncing back as "newer" on the next sync.
+ */
 export function setPlaybackProgress(
   episodeGuid: string,
   progress: PlaybackProgress,
 ): void {
-  Storage.setItemSync(playbackKey(episodeGuid), JSON.stringify(progress));
+  const stamped: PlaybackProgress = {
+    ...progress,
+    updatedAt: progress.updatedAt ?? Date.now(),
+  };
+  Storage.setItemSync(playbackKey(episodeGuid), JSON.stringify(stamped));
+}
+
+/**
+ * Keep the listen position of an episode the same on the phone and the watch.
+ *
+ * Defaults to on. Picking up on the watch where the phone left off is the reason the two
+ * apps are paired at all, so it is the behaviour people expect without asking for it.
+ */
+export function getSyncPlaybackProgress(): boolean {
+  const raw = Storage.getItemSync(SYNC_PLAYBACK_KEY);
+  if (raw == null) return true;
+  return raw === 'true';
+}
+
+export function setSyncPlaybackProgress(enabled: boolean): void {
+  Storage.setItemSync(SYNC_PLAYBACK_KEY, String(enabled));
+}
+
+/**
+ * Progress for every episode queued on the watch, as wire entries.
+ *
+ * Scoped to the watch list on purpose. The watch has no use for the position of an
+ * episode it does not have, and the phone's full listening history grows without bound.
+ */
+export function getWatchListPlaybackProgress(): PlaybackProgressEntry[] {
+  const entries: PlaybackProgressEntry[] = [];
+  for (const item of getWatchList()) {
+    const progress = getPlaybackProgress(item.episodeGuid);
+    if (!progress || progress.position <= 0) continue;
+    entries.push({
+      guid: item.episodeGuid,
+      positionMs: Math.round(progress.position * 1000),
+      durationMs: Math.round(progress.duration * 1000),
+      updatedAt: progress.updatedAt ?? legacyProgressEpoch(),
+    });
+  }
+  return entries;
+}
+
+/**
+ * Apply positions reported by the watch, newest-wins per episode.
+ *
+ * @param isPlayingLocally guids the phone is playing right now. Their position is moving
+ * and is not written to storage on every tick, so a stored value there is stale by
+ * construction — applying an incoming position would jump the audio the user is listening
+ * to. Skipped entirely, whatever the timestamps say.
+ * @returns the guids whose stored position actually changed, so the caller can move a
+ * loaded-but-paused player to match.
+ */
+export function mergeRemotePlaybackProgress(
+  entries: PlaybackProgressEntry[],
+  isPlayingLocally: (guid: string) => boolean,
+): string[] {
+  if (!getSyncPlaybackProgress()) return [];
+  const applied: string[] = [];
+  for (const entry of entries) {
+    if (!entry.guid || entry.positionMs <= 0) continue;
+    if (isPlayingLocally(entry.guid)) continue;
+    const local = getPlaybackProgress(entry.guid);
+    if (local && (local.updatedAt ?? 0) >= entry.updatedAt) continue;
+    setPlaybackProgress(entry.guid, {
+      position: entry.positionMs / 1000,
+      // A remote entry may not know the duration yet; the local one often does.
+      duration: entry.durationMs > 0 ? entry.durationMs / 1000 : (local?.duration ?? 0),
+      // The watch's timestamp, not ours. Re-stamping would make the phone look like the
+      // more recent listener and push this same position straight back.
+      updatedAt: entry.updatedAt,
+    });
+    applied.push(entry.guid);
+  }
+  return applied;
 }

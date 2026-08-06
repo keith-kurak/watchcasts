@@ -100,6 +100,7 @@ import com.google.android.gms.wearable.Wearable
 import dev.podcatch.app.data.DataLayerContract
 import dev.podcatch.app.data.EpisodeDownloadWorker
 import dev.podcatch.app.data.PhoneRequests
+import dev.podcatch.app.data.PlaybackProgressSync
 import dev.podcatch.app.data.WatchEpisode
 import dev.podcatch.app.data.SyncedSettings
 import dev.podcatch.app.data.SyncedSubscriptions
@@ -151,6 +152,10 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
                             Log.d(TAG, "Read existing settings from Data Layer")
                             SyncedSettings.update(json)
                         }
+                        DataLayerContract.PATH_PLAYBACK_PROGRESS_PHONE -> {
+                            Log.d(TAG, "Read existing playback progress from Data Layer")
+                            PlaybackProgressSync.applyFromPhone(this@MainActivity, json)
+                        }
                         DataLayerContract.PATH_SUBSCRIPTIONS -> {
                             Log.d(TAG, "Read existing subscriptions from Data Layer")
                             SyncedSubscriptions.update(json)
@@ -182,6 +187,10 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
                 DataLayerContract.PATH_SUBSCRIPTIONS -> {
                     Log.d(TAG, "Live data change: subscriptions updated")
                     SyncedSubscriptions.update(json)
+                }
+                DataLayerContract.PATH_PLAYBACK_PROGRESS_PHONE -> {
+                    Log.d(TAG, "Live data change: playback progress updated")
+                    PlaybackProgressSync.applyFromPhone(this@MainActivity, json)
                 }
                 DataLayerContract.PATH_WATCH_EPISODES -> {
                     Log.d(TAG, "Live data change: watch episodes updated")
