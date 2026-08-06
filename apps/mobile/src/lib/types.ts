@@ -15,6 +15,12 @@ export interface Episode {
   audioUrl?: string;
   duration?: string;
   imageUrl?: string;
+  /**
+   * Size of the audio enclosure in bytes, as declared by the feed. Absent when the
+   * feed omits or malforms `enclosure/@length`, which is common enough that every
+   * caller must handle it — a missing size counts as zero against storage limits.
+   */
+  sizeBytes?: number;
 }
 
 export type DownloadStatus = 'pending' | 'downloading' | 'complete' | 'error';

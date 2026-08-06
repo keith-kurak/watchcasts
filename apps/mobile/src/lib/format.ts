@@ -48,6 +48,28 @@ export function parseDurationToSeconds(raw?: string): number {
   return isNaN(seconds) ? 0 : seconds;
 }
 
+/** One gibibyte. Storage limits are entered in GB and stored as bytes. */
+export const BytesPerGb = 1024 ** 3;
+
+/**
+ * Human-readable byte count. Uses binary units to match how Android reports free
+ * space. Returns '' for a missing or zero size, so a row can render it directly
+ * when the feed declared no enclosure length.
+ */
+export function formatBytes(bytes?: number): string {
+  if (bytes == null || bytes <= 0) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  // Sub-10 values keep a decimal so '1.5 GB' does not collapse to '2 GB'.
+  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
+}
+
 export function stripHtml(html: string): string {
   return html
     .replace(/<[^>]*>/g, '')

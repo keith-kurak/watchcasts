@@ -15,6 +15,7 @@ import {
   View,
 } from 'react-native';
 
+import { StorageLimitRow } from '@/components/storage-limit-row';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors, NowPlayingBarHeight, Spacing } from '@/constants/theme';
@@ -24,9 +25,19 @@ import { buildOpml, parseOpml } from '@/lib/opml';
 import { fetchFeed } from '@/lib/rss';
 import {
   addSubscription,
+  getPhoneStorageLimitBytes,
+  getPhoneStorageLimitEnabled,
+  getPhoneUsedBytes,
   getSubscriptions,
+  getWatchQueuedBytes,
+  getWatchStorageLimitBytes,
+  getWatchStorageLimitEnabled,
   getWifiOnlyDownloads,
   setCachedEpisodes,
+  setPhoneStorageLimitBytes,
+  setPhoneStorageLimitEnabled,
+  setWatchStorageLimitBytes,
+  setWatchStorageLimitEnabled,
   setWifiOnlyDownloads,
 } from '@/lib/storage';
 
@@ -39,13 +50,43 @@ export default function SettingsScreen() {
   const [subscriptionCount, setSubscriptionCount] = useState(0);
   const [busy, setBusy] = useState<'import' | 'export' | null>(null);
   const [wifiOnly, setWifiOnly] = useState(getWifiOnlyDownloads);
+  const [phoneLimitOn, setPhoneLimitOn] = useState(getPhoneStorageLimitEnabled);
+  const [phoneLimitBytes, setPhoneLimitBytes] = useState(getPhoneStorageLimitBytes);
+  const [watchLimitOn, setWatchLimitOn] = useState(getWatchStorageLimitEnabled);
+  const [watchLimitBytes, setWatchLimitBytes] = useState(getWatchStorageLimitBytes);
+  const [phoneUsed, setPhoneUsed] = useState(0);
+  const [watchQueued, setWatchQueued] = useState(0);
   const { drainPendingDownloads } = useDownloadContext();
 
   useFocusEffect(
     useCallback(() => {
       setSubscriptionCount(getSubscriptions().length);
+      // Re-measured on focus rather than held in a query: downloads finish while
+      // this screen is off-screen, and the totals walk the filesystem.
+      setPhoneUsed(getPhoneUsedBytes());
+      setWatchQueued(getWatchQueuedBytes());
     }, []),
   );
+
+  function handlePhoneLimitEnabledChange(enabled: boolean) {
+    setPhoneLimitOn(enabled);
+    setPhoneStorageLimitEnabled(enabled);
+  }
+
+  function handlePhoneLimitBytesChange(bytes: number) {
+    setPhoneLimitBytes(bytes);
+    setPhoneStorageLimitBytes(bytes);
+  }
+
+  function handleWatchLimitEnabledChange(enabled: boolean) {
+    setWatchLimitOn(enabled);
+    setWatchStorageLimitEnabled(enabled);
+  }
+
+  function handleWatchLimitBytesChange(bytes: number) {
+    setWatchLimitBytes(bytes);
+    setWatchStorageLimitBytes(bytes);
+  }
 
   function handleWifiOnlyChange(enabled: boolean) {
     setWifiOnly(enabled);
@@ -148,6 +189,59 @@ export default function SettingsScreen() {
     <ThemedView style={styles.container}>
       <ScrollView contentContainerStyle={styles.content}>
         <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionTitle}>
+          DOWNLOADS
+        </ThemedText>
+
+        <View style={[styles.row, { backgroundColor: colors.backgroundElement }]}>
+          <View style={styles.rowIcon}>
+            <SymbolView
+              name={{ ios: 'wifi', android: 'wifi' }}
+              size={24}
+              tintColor={colors.text}
+            />
+          </View>
+          <View style={styles.rowText}>
+            <ThemedText style={styles.rowTitle}>Download on Wi-Fi only</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              Applies to this phone and your watch. Episodes will wait to download until a Wi-Fi connection is available.
+            </ThemedText>
+          </View>
+          <Switch value={wifiOnly} onValueChange={handleWifiOnlyChange} />
+        </View>
+
+        <ThemedText
+          type="smallBold"
+          themeColor="textSecondary"
+          style={[styles.sectionTitle, styles.sectionSpacing]}>
+          STORAGE LIMITS
+        </ThemedText>
+
+        <StorageLimitRow
+          icon={{ ios: 'iphone', android: 'smartphone' }}
+          title="Limit phone storage"
+          description="Don't download any more podcasts once this limit is reached."
+          enabled={phoneLimitOn}
+          limitBytes={phoneLimitBytes}
+          usedBytes={phoneUsed}
+          onEnabledChange={handlePhoneLimitEnabledChange}
+          onLimitBytesChange={handlePhoneLimitBytesChange}
+        />
+
+        <StorageLimitRow
+          icon={{ ios: 'applewatch', android: 'watch' }}
+          title="Limit watch storage"
+          description="Measured on your watch once downloaded. Episodes still queued are estimated from the size the podcast publishes."
+          enabled={watchLimitOn}
+          limitBytes={watchLimitBytes}
+          usedBytes={watchQueued}
+          onEnabledChange={handleWatchLimitEnabledChange}
+          onLimitBytesChange={handleWatchLimitBytesChange}
+        />
+
+        <ThemedText
+          type="smallBold"
+          themeColor="textSecondary"
+          style={[styles.sectionTitle, styles.sectionSpacing]}>
           SUBSCRIPTIONS
         </ThemedText>
 
@@ -178,31 +272,6 @@ export default function SettingsScreen() {
           pressedColor={colors.backgroundSelected}
           tintColor={colors.text}
         />
-
-        <ThemedText
-          type="smallBold"
-          themeColor="textSecondary"
-          style={[styles.sectionTitle, styles.sectionSpacing]}>
-          DOWNLOADS
-        </ThemedText>
-
-        <View style={[styles.row, { backgroundColor: colors.backgroundElement }]}>
-          <View style={styles.rowIcon}>
-            <SymbolView
-              name={{ ios: 'wifi', android: 'wifi' }}
-              size={24}
-              tintColor={colors.text}
-            />
-          </View>
-          <View style={styles.rowText}>
-            <ThemedText style={styles.rowTitle}>Download on Wi-Fi only</ThemedText>
-            <ThemedText type="small" themeColor="textSecondary">
-              Applies to this phone and your watch. Episodes queued while you are on
-              cellular wait until you are back on Wi-Fi.
-            </ThemedText>
-          </View>
-          <Switch value={wifiOnly} onValueChange={handleWifiOnlyChange} />
-        </View>
       </ScrollView>
     </ThemedView>
   );

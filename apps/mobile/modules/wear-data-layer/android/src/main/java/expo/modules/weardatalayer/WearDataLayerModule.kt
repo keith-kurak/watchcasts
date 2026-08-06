@@ -187,6 +187,11 @@ class WearDataLayerModule : Module(), MessageClient.OnMessageReceivedListener {
                 "guid" to obj.optString("guid", ""),
                 "status" to obj.optString("status", "pending"),
                 "progress" to obj.optInt("progress", 0),
+                // Measured on-watch file size. 0 from an older watch build, or from an
+                // episode that has not finished downloading, both meaning "unknown".
+                // Long, not Int: a long episode exceeds 2 GB far less often than an Int
+                // overflows, but there is no reason to risk it.
+                "sizeBytes" to obj.optLong("sizeBytes", 0L),
             ))
         }
         return result

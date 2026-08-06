@@ -3,6 +3,7 @@ package dev.podcatch.app.data
 import android.content.Context
 import android.util.Log
 import com.google.android.gms.wearable.Wearable
+import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -54,10 +55,19 @@ object WatchDownloadStatusReporter {
                 // indeterminate download shows as "Downloading…" with no number.
                 else -> ep.downloadProgress.coerceAtLeast(0)
             }
+            // Measured size of what is actually on this watch. Only a finished download
+            // has one — a queued episode has no file yet, so the phone falls back to the
+            // size the feed declared. 0 means "unknown", never "an empty episode".
+            val sizeBytes = ep.localPath
+                ?.let { path -> runCatching { File(path).length() }.getOrDefault(0L) }
+                ?.takeIf { it > 0L }
+                ?: 0L
+
             array.put(JSONObject().apply {
                 put("guid", ep.guid)
                 put("status", status)
                 put("progress", progress)
+                put("sizeBytes", sizeBytes)
             })
         }
 

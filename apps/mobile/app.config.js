@@ -32,10 +32,8 @@ module.exports = ({ config }) => ({
   android: {
     package: APPLICATION_ID,
     adaptiveIcon: {
-      backgroundColor: "#E6F4FE",
-      foregroundImage: "./assets/images/android-icon-foreground.png",
-      backgroundImage: "./assets/images/android-icon-background.png",
-      monochromeImage: "./assets/images/android-icon-monochrome.png",
+      backgroundColor: "#FAF3E3",
+      foregroundImage: "./assets/images/android-icon-foreground.png"
     },
     predictiveBackGestureEnabled: false,
   },
@@ -71,6 +69,11 @@ module.exports = ({ config }) => ({
       "expo-build-properties",
       {
         usePrecompiledModules: true,
+        android: {
+          // Android 12+ only. Expo's default is 24 (Android 7.0); this is a
+          // deliberate floor, not an inherited value.
+          minSdkVersion: 31,
+        },
       },
     ],
   ],

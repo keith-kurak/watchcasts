@@ -1,6 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Background mirrors android.adaptiveIcon.backgroundColor in apps/mobile/app.config.js.
+
+  The foreground PNGs are a plain resize of the phone's assets/images/android-icon-foreground.png
+  to the 108dp canvas at each density (108/162/216/324/432 px), via "sips -z". Nothing about them
+  is watch-specific, so regenerating from that asset reproduces them exactly.
+
+  The duck fills 44% of that canvas. Sized for Wear's round mask, which is the tighter of the two:
+  the glyph's bounding box is 1.36x as long on the diagonal as it is wide, so at 44% the diagonal
+  lands at 90% of the visible circle. At 56% it exceeded the circle and clipped the mic and
+  headphone. Raise this only against the circle, not the phone's squircle.
+
+  No <monochrome>: the phone config dropped monochromeImage, and the foreground is full-colour
+  artwork. A themed icon derives its shape from the layer's alpha, so pointing monochrome at
+  this would render a flat silhouette of the duck.
+-->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/ic_launcher_background" />
-    <foreground android:drawable="@drawable/ic_launcher_foreground" />
-    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
 </adaptive-icon>

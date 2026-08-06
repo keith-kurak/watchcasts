@@ -109,6 +109,25 @@ Episodes whose cached episode record cannot be found are skipped. The payload ca
 
 `triggerSync()` fires on every watch-list add and remove.
 
+### The phone caps what it will queue
+
+`WatchToggle` refuses to add an episode when the watch storage limit is on and the queue has
+already reached it. `getWatchLimitState()` in `apps/mobile/src/lib/storage.ts` sums the
+**feed-declared** `enclosure/@length` of every queued episode — the phone cannot see the watch's
+filesystem, so this is an estimate, not a measurement.
+
+Two consequences worth knowing:
+
+- Feeds that omit the length, or publish `length="0"` (audioboom does), contribute **zero** to the
+  total. A queue of such episodes never trips the limit.
+- The limit is **soft** and **phone-side only**. Nothing is sent to the watch, the watch does not
+  enforce it, and going over never deletes anything — it only refuses the next add. The watch will
+  still download everything already in the list.
+
+The contract is unchanged: `SyncedSettings` does not carry the limit, so the watch has no knowledge
+of it. Enforcing on the watch instead would require the limit in all three mirrored contract files
+plus `EpisodeDownloadWorker`. See **K20**.
+
 ### When the watch receives it
 
 Three entry points call `SyncedWatchEpisodes.update(json)`:
@@ -435,6 +454,11 @@ Per episode it derives:
 |---|---|
 | `status` | `complete` if `localPath != null`, else `error` if `error`, else `downloading` if `downloadProgress != 0`, else `waiting-wifi` if held by the Wi-Fi-only setting, else `pending` |
 | `progress` | `100` if complete, `0` if error, else `max(downloadProgress, 0)` |
+| `sizeBytes` | `File(localPath).length()` when complete, else `0` |
+
+`sizeBytes` is the only field that reports **measured** state rather than derived state. It is
+`0` for anything not yet downloaded, and `0` from watch builds predating the field. The phone
+treats `0` as "unknown" and falls back to the feed-declared size — never as "uses no space".
 
 `waiting-wifi` exists so the phone can say *why* nothing is happening. The watch derives it
 from `SyncedSettings.isWaitingForWifi`, which checks `NET_CAPABILITY_NOT_METERED` — the same
@@ -457,6 +481,18 @@ broadcast as fact.
 - On each message, **replaces** its whole map: `setStatuses(new Map(event.statuses.map(...)))`
 
 Replace-not-merge means any report the watch sends becomes the phone's entire view of watch download state.
+
+**`sizeBytes` is the exception — it is merged and persisted.** `mergeWatchReportedSizes()` in
+`lib/storage.ts` writes reported sizes to the `watchReportedSizes` key, keyed by guid, and only
+for values greater than zero. Two reasons it cannot follow the replace-everything rule:
+
+- The watch storage limit is checked from `WatchToggle` through plain storage calls, which cannot
+  read React context. The numbers have to outlive the in-memory map.
+- A report covers only what is queued *right now*, and a zero means "not downloaded yet". Replacing
+  would drop a measured size every time the watch reported mid-download.
+
+Entries for guids no longer on the watch list are pruned on each merge, so the map cannot grow
+without bound. `getWatchQueuedBytes()` prefers a measured size and falls back to the feed's.
 
 The `/podcatch/request-download-status` handler on the watch calls `load()` before reporting,
 so a fresh process reports real state rather than nothing.
@@ -493,8 +529,18 @@ Open defects. Each is a real, reproducible cause of user-visible breakage.
 | # | Issue | Effect |
 |---|---|---|
 | K9 | `HttpURLConnection` will not follow HTTP↔HTTPS redirects. Podcast prefix URLs redirect constantly. | The redirect page is written and renamed to `.mp3`. A tiny, broken file looks complete. |
+| K20 | The watch storage limit is enforced only on the phone. The watch neither receives nor enforces it. | Going over blocks the next add on the phone, but nothing stops the watch downloading what is already queued. |
+| K21 | Only a **completed** download has a measured size. A queued-but-not-downloaded episode still falls back to the feed, and audioboom publishes `length="0"`. | Such an episode counts as zero until it finishes. The running total is right for space already used, and can undercount what is still incoming. |
 
 K9 is deferred as T2, and disappears if T1 (OkHttp) lands first.
+
+K20 is a deliberate scope choice — enforcing on the watch means adding the limit to
+`SyncedSettings` in all three mirrored contract files plus `EpisodeDownloadWorker`. Reporting the
+measured size (below) narrowed it: the phone's total is now measured for everything already on the
+watch, which is the part that determines whether there is room.
+
+K21 is the residue of that, and is self-correcting — the zero is replaced by a real number as soon
+as the episode finishes downloading.
 
 ### Documentation drift
 
@@ -517,6 +563,36 @@ duplication).
 ## 8. Change log
 
 Newest first. Add an entry whenever sync behavior changes.
+
+### 2026-08-06 — the watch reports its measured download size
+
+Narrows **K20**, adds **K21**. **Contract change: both apps must be rebuilt.**
+
+- `WatchDownloadStatusReporter` adds `sizeBytes` to each entry of the
+  `/podcatch/watch-download-status` payload — `File(localPath).length()` when complete, else `0`.
+- `WearDataLayerModule.parseStatusJson` reads it with `optLong`, so a watch build predating the
+  field yields `0` rather than failing. The two directions are independently deployable.
+- `mergeWatchReportedSizes()` persists non-zero sizes to the `watchReportedSizes` key.
+  `getWatchQueuedBytes()` prefers them over the feed's, and the watch tab shows the measured value.
+- The `sizeBytes` field is documented in `packages/shared/src/datalayer.ts`.
+  `DataLayerContract.kt` lists paths only, not payload shapes, so it needed no change.
+
+Verified: both Kotlin sides compile (`:app:compileDebugKotlin` on the watch,
+`:wear-data-layer:compileDebugKotlin` on the phone). **Not yet verified on device** — that needs
+the two rebuilds.
+
+### 2026-08-05 — phone-side watch storage limit
+
+Adds **K20**. No contract change: `SyncedSettings` is untouched and the watch is unaware of the limit.
+
+- `Episode.sizeBytes` now carries `enclosure/@length` from the feed. `parseEnclosureLength` in
+  `lib/rss.ts` rejects anything that is not a positive integer, so `length="0"` becomes `undefined`
+  rather than a bogus zero.
+- `getWatchLimitState()` sums those sizes across the stored watch list. `WatchToggle` refuses to add
+  when the limit is on and the total has reached it.
+- Cached episodes from before this change have no `sizeBytes` until their feed is refetched, so the
+  estimate reads low until then.
+- The watch tab shows each episode's feed-declared size. Rows whose feed omits it show nothing.
 
 ### 2026-08-04 — durable removal from the watch
 

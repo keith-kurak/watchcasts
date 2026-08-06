@@ -1,10 +1,12 @@
 import { useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
 import { BadgedIcon, type DestinationState } from '@/components/badged-icon';
 import { RemoveDialog } from '@/components/remove-dialog';
 import { useDownloadContext } from '@/lib/download-context';
+import { formatBytes } from '@/lib/format';
 import { useDownloadMutations, useIsInDownloads } from '@/lib/queries';
+import { getPhoneLimitState } from '@/lib/storage';
 
 interface DownloadToggleProps {
   podcastId: string;
@@ -29,6 +31,16 @@ export function DownloadToggle({ podcastId, episodeGuid, audioUrl }: DownloadTog
     } else if (isDownloaded) {
       remove.mutate({ episodeGuid });
     } else if (audioUrl) {
+      const limit = getPhoneLimitState();
+      if (!limit.allowed) {
+        Alert.alert(
+          'Phone storage limit reached',
+          `Downloaded episodes use ${formatBytes(limit.usedBytes)} of your ` +
+            `${formatBytes(limit.limitBytes)} limit. Remove an episode, or raise the ` +
+            `limit in Settings, to download another.`,
+        );
+        return;
+      }
       add.mutate({ podcastId, episodeGuid, audioUrl });
     }
   }

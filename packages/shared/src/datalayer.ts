@@ -31,7 +31,13 @@ export const MessagePaths = {
   REQUEST_SYNC: "/podcatch/request-sync",
   /** Phone -> watch: "Send me your current download statuses." */
   REQUEST_DOWNLOAD_STATUS: "/podcatch/request-download-status",
-  /** Watch -> phone: JSON array of { guid, status, progress }. */
+  /**
+   * Watch -> phone: JSON array of { guid, status, progress, sizeBytes }.
+   *
+   * `sizeBytes` is the measured size of the downloaded file on the watch. It is 0 for an
+   * episode that has not finished downloading, and 0 from watch builds predating the
+   * field — both mean "unknown", so the phone falls back to the size the feed declared.
+   */
   WATCH_DOWNLOAD_STATUS: "/podcatch/watch-download-status",
   /**
    * Watch -> phone: "drop this episode from the watch queue." Payload is the raw

@@ -7,7 +7,7 @@ import WearDataLayerModule, {
 } from '../../modules/wear-data-layer/src';
 import { requestWatchDownloadStatus } from '@/hooks/useWearDataLayer';
 import { publishWatchList } from '@/lib/queries';
-import { removeFromWatchList } from '@/lib/storage';
+import { mergeWatchReportedSizes, removeFromWatchList } from '@/lib/storage';
 
 const isAndroid = Platform.OS === 'android';
 
@@ -31,6 +31,11 @@ export function WatchStatusProvider({ children }: { children: React.ReactNode })
       'onWatchDownloadStatus',
       (event: { statuses: WatchEpisodeStatus[] }) => {
         setStatuses(new Map(event.statuses.map((s) => [s.guid, s])));
+        // Persist the measured sizes too. The watch storage limit is checked outside
+        // React, so it cannot read this context.
+        mergeWatchReportedSizes(
+          Object.fromEntries(event.statuses.map((s) => [s.guid, s.sizeBytes ?? 0])),
+        );
       },
     );
 

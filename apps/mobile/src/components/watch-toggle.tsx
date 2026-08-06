@@ -1,9 +1,11 @@
 import { useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
 import { BadgedIcon, type DestinationState } from '@/components/badged-icon';
 import { RemoveDialog } from '@/components/remove-dialog';
+import { formatBytes } from '@/lib/format';
 import { useIsOnWatchList, useWatchListMutations } from '@/lib/queries';
+import { getWatchLimitState } from '@/lib/storage';
 import { useWatchStatus } from '@/lib/watch-status-context';
 
 interface WatchToggleProps {
@@ -20,9 +22,19 @@ export function WatchToggle({ podcastId, episodeGuid }: WatchToggleProps) {
   function handlePress() {
     if (onWatchList) {
       setShowRemoveDialog(true);
-    } else {
-      add.mutate({ podcastId, episodeGuid });
+      return;
     }
+    const limit = getWatchLimitState();
+    if (!limit.allowed) {
+      Alert.alert(
+        'Watch storage limit reached',
+        `Episodes queued for your watch use about ${formatBytes(limit.usedBytes)} of ` +
+          `your ${formatBytes(limit.limitBytes)} limit. Remove one, or raise the limit ` +
+          `in Settings, to queue another.`,
+      );
+      return;
+    }
+    add.mutate({ podcastId, episodeGuid });
   }
 
   // Queued but the watch has not reported yet — treat as pending rather than idle,
