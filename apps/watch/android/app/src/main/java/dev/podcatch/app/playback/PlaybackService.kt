@@ -5,6 +5,7 @@ import android.content.Intent
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
@@ -18,6 +19,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import dev.podcatch.app.data.PlaybackProgressSync
+import dev.podcatch.app.data.SyncedWatchEpisodes
+import dev.podcatch.app.data.UpNextQueue
 
 class PlaybackService : MediaSessionService() {
 
@@ -80,6 +83,50 @@ class PlaybackService : MediaSessionService() {
                 // would block the next request from being noticed.
                 PlaybackState.clearSeekRequest()
             }
+        }
+    }
+
+    /**
+     * Start the next queued episode when the current one ends.
+     *
+     * Skips queued episodes with no downloaded file rather than stopping at one. The queue
+     * can outlive a download — an episode is removed from the watch, or a file is cleaned
+     * up — and ending playback on an entry that was never playable is worse than passing
+     * over it. Skipped episodes stay queued.
+     */
+    private fun playNextFromQueue(player: Player) {
+        UpNextQueue.load(this)
+        SyncedWatchEpisodes.load(this)
+        val episodes = SyncedWatchEpisodes.episodes.value
+        for (guid in UpNextQueue.guids.value) {
+            val next = episodes.firstOrNull { it.guid == guid } ?: continue
+            val localPath = next.localPath
+            if (localPath.isNullOrBlank()) continue
+
+            val metadata = MediaMetadata.Builder()
+                .setTitle(next.title)
+                .setArtist(next.podcastTitle)
+                .build()
+            val item = MediaItem.Builder()
+                .setMediaId(next.guid)
+                .setUri(localPath)
+                .setMediaMetadata(metadata)
+                .build()
+
+            // Same rule the player screen uses: a finished episode starts over, a
+            // part-listened one resumes.
+            val saved = PlaybackState.getProgress(next.guid)
+            val startPosition = if (saved.completed) 0L else saved.positionMs
+
+            // Removed as it starts, not when it was queued: an episode is "up next" until
+            // it becomes "now playing", and leaving it in both places reads as a duplicate.
+            UpNextQueue.remove(next.guid)
+
+            player.setMediaItem(item, startPosition)
+            player.prepare()
+            player.play()
+            PlaybackState.setCurrentEpisode(next.guid)
+            return
         }
     }
 
@@ -150,6 +197,11 @@ class PlaybackService : MediaSessionService() {
                             val player = mediaSession?.player
                             if (guid != null && player != null) {
                                 PlaybackState.markCompleted(guid, player.duration.coerceAtLeast(0L))
+                                PlaybackProgressSync.publish(
+                                    this@PlaybackService,
+                                    force = true,
+                                )
+                                playNextFromQueue(player)
                             }
                         }
                     }

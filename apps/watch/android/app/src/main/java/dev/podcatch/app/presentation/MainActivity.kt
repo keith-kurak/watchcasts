@@ -45,6 +45,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.Alignment
@@ -73,6 +74,7 @@ import androidx.wear.compose.material.Chip
 import androidx.wear.compose.material.ChipDefaults
 import androidx.wear.compose.material.CircularProgressIndicator
 import androidx.wear.compose.material.Icon
+import androidx.wear.compose.material.ListHeader
 import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.dialog.Alert
 import androidx.wear.compose.material.dialog.Dialog
@@ -105,12 +107,14 @@ import dev.podcatch.app.data.WatchEpisode
 import dev.podcatch.app.data.SyncedSettings
 import dev.podcatch.app.data.SyncedSubscriptions
 import dev.podcatch.app.data.SyncedWatchEpisodes
+import dev.podcatch.app.data.UpNextQueue
 import dev.podcatch.app.data.WatchDownloadStatusReporter
 import dev.podcatch.app.playback.EpisodeProgress
 import dev.podcatch.app.playback.EpisodeStatus
 import dev.podcatch.app.playback.PlaybackState
 import dev.podcatch.app.playback.statusOf
 import java.io.File
+import kotlinx.coroutines.launch
 import dev.podcatch.app.presentation.theme.PodcatchTheme
 
 class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
@@ -133,6 +137,7 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
         SyncedWatchEpisodes.load(this)
         SyncedWatchEpisodes.artworkDir?.mkdirs()
         SyncedSettings.load(this)
+        UpNextQueue.load(this)
         PlaybackState.init(this)
         setContent { PodcatchApp() }
     }
@@ -247,8 +252,11 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
 private fun EpisodeActionsDialog(
     visible: Boolean,
     episode: WatchEpisode?,
+    queued: Boolean,
+    queueFull: Boolean,
     onDismiss: () -> Unit,
     onRetry: () -> Unit,
+    onToggleUpNext: () -> Unit,
     onRemove: () -> Unit,
 ) {
     val isDownloaded = episode?.localPath != null
@@ -282,6 +290,30 @@ private fun EpisodeActionsDialog(
                     Chip(
                         label = { Text("Retry download") },
                         onClick = onRetry,
+                        colors = ChipDefaults.primaryChipColors(),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+            // Only for something already on the watch. Queuing an episode that has not
+            // downloaded would promise a playback this watch cannot deliver.
+            //
+            // A full queue shows a disabled chip saying so, rather than hiding the
+            // option — an action that silently vanishes reads as a bug.
+            if (isDownloaded) {
+                item {
+                    Chip(
+                        label = {
+                            Text(
+                                when {
+                                    queued -> "Remove from Up Next"
+                                    queueFull -> "Up Next is full"
+                                    else -> "Add to Up Next"
+                                },
+                            )
+                        },
+                        onClick = onToggleUpNext,
+                        enabled = queued || !queueFull,
                         colors = ChipDefaults.primaryChipColors(),
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -413,6 +445,116 @@ fun PodcatchApp() {
     }
 }
 
+/**
+ * One episode row.
+ *
+ * Extracted so the Up Next group and the rest of the list cannot drift apart — they are
+ * the same rows, only grouped.
+ */
+@Composable
+private fun EpisodeCard(
+    episode: WatchEpisode,
+    progress: EpisodeProgress?,
+    isPlaying: Boolean,
+    waitingForWifi: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
+    val isDownloaded = episode.localPath != null
+    Card(
+        // The real gestures live on the Row below. A child clickable wins over the Card's
+        // own, and only the child supports long-press — Wear Compose Material 1.4 has no
+        // Card(onLongClick).
+        onClick = {},
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp)
+            .alpha(if (isDownloaded) 1f else 0.6f),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .combinedClickable(
+                    // Tapping a non-downloaded episode used to start a download that was
+                    // frequently discarded by KEEP while the toast said otherwise.
+                    // Downloading is automatic; the only manual action is retrying.
+                    onClick = { if (isDownloaded) onClick() },
+                    onLongClick = onLongClick,
+                ),
+        ) {
+            val artworkModel = episode.artworkPath?.let { File(it) }
+                ?: episode.artworkUrl.takeIf { it.isNotBlank() }
+            if (artworkModel != null) {
+                AsyncImage(
+                    model = artworkModel,
+                    contentDescription = episode.podcastTitle,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(6.dp)),
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = episode.title,
+                    style = MaterialTheme.typography.body2,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    // Holds for 1.2s, scrolls, repeats 3 times, then rests on the start of
+                    // the title. Defaults come from the platform TextView marquee.
+                    modifier = Modifier.basicMarquee(),
+                )
+                Text(
+                    text = episode.podcastTitle,
+                    style = MaterialTheme.typography.caption2,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(modifier = Modifier.width(6.dp))
+            if (isDownloaded) {
+                EpisodeStatusIndicator(progress = progress, isPlaying = isPlaying)
+            } else if (waitingForWifi && episode.downloadProgress == 0 && !episode.error) {
+                Icon(
+                    imageVector = Icons.Rounded.SignalWifiOff,
+                    contentDescription = "Waiting for Wi-Fi",
+                    tint = Color(0xFFFFB300),
+                    modifier = Modifier.size(18.dp),
+                )
+            } else if (episode.error) {
+                // Distinct from "not downloaded yet" so the long-press retry has something
+                // to be discoverable from.
+                Icon(
+                    imageVector = Icons.Rounded.ErrorOutline,
+                    contentDescription = "Download failed — long press to retry",
+                    tint = Color(0xFFFF6B6B),
+                    modifier = Modifier.size(18.dp),
+                )
+            } else if (episode.downloadProgress != 0) {
+                Text(
+                    // Negative means the server sent no Content-Length, so there is no
+                    // percentage to show — only "in progress".
+                    text = if (episode.downloadProgress > 0) {
+                        "${episode.downloadProgress}%"
+                    } else {
+                        "…"
+                    },
+                    style = MaterialTheme.typography.caption3,
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Rounded.Download,
+                    contentDescription = "Not downloaded",
+                    tint = Color.Gray,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+    }
+}
+
 /** Yellow dot = new, ring = part-listened, grey check = finished. */
 @Composable
 private fun EpisodeStatusIndicator(progress: EpisodeProgress?, isPlaying: Boolean) {
@@ -479,13 +621,37 @@ fun EpisodeListScreen(
     // "not downloaded yet / Retry download" variant for a frame on the way past.
     var menuEpisode by remember { mutableStateOf<WatchEpisode?>(null) }
     var menuVisible by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    val upNextGuids by UpNextQueue.guids.collectAsState()
+    // Queued episodes float to the top in QUEUE order, not list order — the queue is a
+    // play order, and showing it sorted any other way would misrepresent what plays next.
+    val queuedEpisodes = upNextGuids.mapNotNull { guid -> episodes.firstOrNull { it.guid == guid } }
+    val restEpisodes = episodes.filterNot { it.guid in upNextGuids }
+    val menuQueued = menuEpisode?.let { UpNextQueue.contains(it.guid) } == true
 
     EpisodeActionsDialog(
         visible = menuVisible,
         episode = menuEpisode,
+        queued = menuQueued,
+        queueFull = UpNextQueue.isFull,
         onDismiss = { menuVisible = false },
         onRetry = {
             menuEpisode?.let { retryEpisodeDownload(context, it) }
+            menuVisible = false
+        },
+        onToggleUpNext = {
+            menuEpisode?.let {
+                if (UpNextQueue.contains(it.guid)) {
+                    UpNextQueue.remove(it.guid)
+                } else if (UpNextQueue.add(it.guid)) {
+                    // Queuing inserts the Up Next section ABOVE the current scroll
+                    // position, and the list keeps that position — so on a screen showing
+                    // two or three rows the whole thing happens off-screen and reads as
+                    // "nothing happened". Scrolling to the top is the confirmation.
+                    scope.launch { listState.animateScrollToItem(0) }
+                }
+            }
             menuVisible = false
         },
         onRemove = {
@@ -518,108 +684,38 @@ fun EpisodeListScreen(
                     )
                 }
             } else {
-                items(episodes, key = { it.guid }) { episode ->
-                    val isDownloaded = episode.localPath != null
-                    Card(
-                        // The real gestures live on the Row below. A child clickable wins
-                        // over the Card's own, and only the child supports long-press —
-                        // Wear Compose Material 1.4 has no Card(onLongClick).
-                        onClick = {},
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 2.dp)
-                            .alpha(if (isDownloaded) 1f else 0.6f),
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .combinedClickable(
-                                    // Tapping a non-downloaded episode used to start a
-                                    // download that was frequently discarded by KEEP while
-                                    // the toast said otherwise. Downloading is automatic;
-                                    // the only manual action is retrying a failure.
-                                    onClick = { if (isDownloaded) onEpisodeClick(episode) },
-                                    onLongClick = {
-                                        menuEpisode = episode
-                                        menuVisible = true
-                                    },
-                                ),
-                        ) {
-                            val artworkModel = episode.artworkPath?.let { File(it) }
-                                ?: episode.artworkUrl.takeIf { it.isNotBlank() }
-                            if (artworkModel != null) {
-                                AsyncImage(
-                                    model = artworkModel,
-                                    contentDescription = episode.podcastTitle,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(RoundedCornerShape(6.dp)),
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                            }
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = episode.title,
-                                    style = MaterialTheme.typography.body2,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    // Holds for 1.2s, scrolls, repeats 3 times, then rests
-                                    // on the start of the title. Defaults come from the
-                                    // platform TextView marquee.
-                                    modifier = Modifier.basicMarquee(),
-                                )
-                                Text(
-                                    text = episode.podcastTitle,
-                                    style = MaterialTheme.typography.caption2,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(6.dp))
-                            if (isDownloaded) {
-                                EpisodeStatusIndicator(
-                                    progress = progressByGuid[episode.guid],
-                                    isPlaying = episode.guid == playingGuid,
-                                )
-                            } else if (waitingForWifi && episode.downloadProgress == 0 && !episode.error) {
-                                Icon(
-                                    imageVector = Icons.Rounded.SignalWifiOff,
-                                    contentDescription = "Waiting for Wi-Fi",
-                                    tint = Color(0xFFFFB300),
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            } else if (episode.error) {
-                                // Distinct from "not downloaded yet" so the long-press retry
-                                // has something to be discoverable from.
-                                Icon(
-                                    imageVector = Icons.Rounded.ErrorOutline,
-                                    contentDescription = "Download failed — long press to retry",
-                                    tint = Color(0xFFFF6B6B),
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            } else if (episode.downloadProgress != 0) {
-                                Text(
-                                    // Negative means the server sent no Content-Length, so
-                                    // there is no percentage to show — only "in progress".
-                                    text = if (episode.downloadProgress > 0) {
-                                        "${episode.downloadProgress}%"
-                                    } else {
-                                        "…"
-                                    },
-                                    style = MaterialTheme.typography.caption3,
-                                )
-                            } else {
-                                Icon(
-                                    imageVector = Icons.Rounded.Download,
-                                    contentDescription = "Not downloaded",
-                                    tint = Color.Gray,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            }
-                        }
+                // Queued episodes float to the top under their own heading. The headings
+                // only appear when something is queued — a lone "All episodes" heading
+                // above an unchanged list is noise.
+                if (queuedEpisodes.isNotEmpty()) {
+                    item { ListHeader { Text("Up Next") } }
+                    items(queuedEpisodes, key = { "upnext:${it.guid}" }) { episode ->
+                        EpisodeCard(
+                            episode = episode,
+                            progress = progressByGuid[episode.guid],
+                            isPlaying = episode.guid == playingGuid,
+                            waitingForWifi = waitingForWifi,
+                            onClick = { onEpisodeClick(episode) },
+                            onLongClick = {
+                                menuEpisode = episode
+                                menuVisible = true
+                            },
+                        )
                     }
+                    item { ListHeader { Text("All episodes") } }
+                }
+                items(restEpisodes, key = { it.guid }) { episode ->
+                    EpisodeCard(
+                        episode = episode,
+                        progress = progressByGuid[episode.guid],
+                        isPlaying = episode.guid == playingGuid,
+                        waitingForWifi = waitingForWifi,
+                        onClick = { onEpisodeClick(episode) },
+                        onLongClick = {
+                            menuEpisode = episode
+                            menuVisible = true
+                        },
+                    )
                 }
             }
         }

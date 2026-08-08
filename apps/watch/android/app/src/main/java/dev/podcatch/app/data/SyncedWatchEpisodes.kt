@@ -279,6 +279,9 @@ object SyncedWatchEpisodes {
         // Holding them forever would also block the user deliberately re-adding the same
         // episode from the phone later.
         forgetConfirmedRemovals(incomingGuids)
+        // An episode that has left the list cannot play, so it cannot be up next. Left in,
+        // it would be invisible but still occupy one of the queue's five slots.
+        UpNextQueue.pruneTo(list.map { it.guid }.toSet())
         persist()
     }
 
@@ -373,6 +376,7 @@ object SyncedWatchEpisodes {
         }
         PlaybackState.forget(guid)
         lastPersistedProgress.remove(guid)
+        UpNextQueue.remove(guid)
         _episodes.update { list -> list.filterNot { it.guid == guid } }
         persist()
     }
