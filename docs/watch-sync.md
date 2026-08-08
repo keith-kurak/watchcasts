@@ -4,7 +4,7 @@ How the Podcatch phone app and the Wear OS app exchange data, and how the watch 
 
 > **Keep this current.** Any change to the Data Layer contract, the download worker, or watch-side state must be reflected here in the same commit. See [Change log](#change-log).
 >
-> **Status:** describes behavior as of 2026-08-06. The [Known issues](#known-issues) section lists defects that exist in the code today.
+> **Status:** describes behavior as of 2026-08-07. The [Known issues](#known-issues) section lists defects that exist in the code today.
 
 ---
 
@@ -642,7 +642,62 @@ replicated when it next opens.
 
 ---
 
-## 8. Known issues
+## 8. Up Next — watch only
+
+The watch keeps a queue of up to five episodes, played automatically after the current one.
+`SharedPreferences("up-next")` via `UpNextQueue`.
+
+**Nothing about it crosses the Data Layer, and the phone has no notion of it.** No contract
+path, no ownership question, nothing mirrored across three files. It is set on the watch
+and seen on the watch.
+
+That is a deliberate narrowing. Earlier versions put a queue on the phone too — first one
+phone-local queue behind both phone tabs, then a phone-owned queue synced to the watch.
+Both were harder to understand than the thing they were automating: two queues invited the
+question of which one you were looking at, and managing the watch's queue from the phone
+was a layer of indirection over a decision you make in the moment, on the device you are
+listening on. This section exists only because the feature touches code this document owns.
+
+### Where it touches synced state
+
+Pruning, in both directions an episode can leave the watch list:
+
+- `SyncedWatchEpisodes.update()` calls `UpNextQueue.pruneTo()` with the incoming guids, and
+  `removeEpisode()` drops the guid it removes. An episode that has left the list cannot
+  play, so it cannot be up next.
+- `DataLayerListenerService` calls `UpNextQueue.load()` **before** `update()`, so the prune
+  works on a loaded queue rather than silently pruning an empty one in a fresh process.
+
+Pruning matters because a stale entry is **invisible but still occupies a slot** — nothing
+renders it, and the queue reads as full with fewer than five episodes shown.
+
+### On the watch
+
+Queued episodes sort to the top of the list under a Wear `ListHeader` (`Up Next` /
+`All episodes`); the headings only appear when something is queued. Long-press offers
+`Add to Up Next` / `Remove from Up Next`, and only for a downloaded episode — queuing one
+that has not arrived would promise a playback the watch cannot deliver. A full queue shows
+a disabled `Up Next is full` chip rather than hiding the option, since an action that
+silently vanishes reads as a bug.
+
+Adding scrolls the list to the top. Queuing inserts the Up Next section *above* the current
+scroll position, and the list keeps that position — so on a round screen showing two or
+three rows the whole change happens off-screen and reads as nothing having happened.
+Reported from the field the day it landed.
+
+### Auto-advance
+
+`Player.STATE_ENDED` in `PlaybackService.playNextFromQueue` starts the next queued episode
+and removes it from the queue **as it starts**, not when it was queued — an episode is "up
+next" until it becomes "now playing".
+
+It **skips** a queued episode with no `localPath` rather than stopping at it, and leaves it
+queued. A finished episode restarts from zero and a part-listened one resumes, the same
+rule the player screen already used.
+
+---
+
+## 9. Known issues
 
 Open defects. Each is a real, reproducible cause of user-visible breakage.
 
@@ -704,9 +759,43 @@ duplication).
 
 ---
 
-## 9. Change log
+## 10. Change log
 
 Newest first. Add an entry whenever sync behavior changes.
+
+### 2026-08-07 — Up Next, on the watch only
+
+A queue of up to five episodes on the watch, played automatically after the current one.
+**No contract change** — nothing crosses the Data Layer. See [Up Next](#8-up-next--watch-only).
+
+- New `UpNextQueue`, persisted like the rest of watch state. Queued episodes sort to the
+  top under a Wear `ListHeader`, with `Add to Up Next` / `Remove from Up Next` in the
+  existing long-press dialog, and auto-advance in `PlaybackService`.
+- `SyncedWatchEpisodes.update()` and `removeEpisode()` prune it; `DataLayerListenerService`
+  loads it before `update()` so a fresh process prunes a real queue rather than an empty one.
+- The episode row moved into an `EpisodeCard` composable so the Up Next group and the rest
+  of the list cannot drift apart.
+
+Two designs were built and discarded first, both phone-involving, neither committed:
+
+1. A phone-local queue shared by the Downloads and Watch tabs, plus a separate watch queue.
+   The Watch tab's Up Next was then a phone-side fiction the watch never saw — queuing on
+   the phone did nothing on the watch.
+2. A phone-owned queue synced to the watch over a new DataItem plus a request message,
+   following the watch-episode-list ownership pattern. It worked end to end, but two
+   queues and remote management of the watch's one were harder to follow than the feature
+   warranted.
+
+The lesson is in the shape of the thing, not the plumbing: the queue answers "what next, on
+this device, right now", which is a decision made where you are listening. Both discarded
+designs were attempts to make it answerable from somewhere else.
+
+Verified on the Wear emulator: cold start, long-press a mid-list episode, list jumps to the
+top showing `Up Next` / `All episodes`; removing returns it. Auto-advance confirmed from
+stored state — a finished episode handed over to the queued one, which left the queue.
+
+Not exercised: the five-episode cap and its "Up Next is full" state, and the skip-over path
+where a queued episode has no local file.
 
 ### 2026-08-06 — playback progress sync
 

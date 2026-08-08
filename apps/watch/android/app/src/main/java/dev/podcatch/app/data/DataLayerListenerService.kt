@@ -53,6 +53,9 @@ class DataLayerListenerService : WearableListenerService() {
                     // Load first: update() reconciles against existing state, and in a
                     // fresh process that state only exists on disk.
                     SyncedWatchEpisodes.load(applicationContext)
+                    // Before update(), so the prune inside it has a loaded queue to work
+                    // on rather than silently pruning an empty one.
+                    UpNextQueue.load(applicationContext)
                     SyncedWatchEpisodes.update(json)
                     // A list just arrived, so the phone is reachable. Good moment to retry
                     // any removal it has not acknowledged.
