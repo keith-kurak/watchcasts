@@ -15,7 +15,7 @@ const APPLICATION_ID = IS_DEV
 
 module.exports = ({ config }) => ({
   ...config,
-  name: IS_DEV ? "TinyP (Dev)" : "Tiny Podcatcher",
+  name: IS_DEV ? "PDuck (Dev)" : "Podcast Duck",
   slug: "podcatch",
   version: "1.0.0",
   orientation: "portrait",
