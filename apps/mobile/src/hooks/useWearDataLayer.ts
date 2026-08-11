@@ -50,6 +50,12 @@ export async function getConnectedNodes(): Promise<
   return WearDataLayerModule.getConnectedNodes();
 }
 
+/** Ask the watch to retry one failed download. */
+export async function retryWatchEpisode(guid: string): Promise<void> {
+  if (!isAndroid) return;
+  await WearDataLayerModule.retryWatchEpisode(guid);
+}
+
 /** Ask the watch to send its current download statuses via message. */
 export async function requestWatchDownloadStatus(): Promise<void> {
   if (!isAndroid) return;

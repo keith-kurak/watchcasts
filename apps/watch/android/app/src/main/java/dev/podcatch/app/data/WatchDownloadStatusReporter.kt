@@ -34,7 +34,7 @@ object WatchDownloadStatusReporter {
         //   2. The download worker asked for a high-bandwidth network and got none. The
         //      Bluetooth proxy reports NOT_METERED, so case 1 does *not* catch this.
         val waitingForWifi = SyncedSettings.isWaitingForWifi(context) ||
-            HighBandwidthNetwork.lastAcquireFailed
+            HighBandwidthNetwork.lastAcquireFailed(context)
 
         val array = JSONArray()
         for (ep in episodes) {

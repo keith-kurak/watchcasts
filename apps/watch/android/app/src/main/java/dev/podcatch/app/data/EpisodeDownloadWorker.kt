@@ -9,6 +9,7 @@ import android.content.pm.ServiceInfo
 import android.net.Network
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
@@ -25,6 +26,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.TimeUnit
 
 /**
  * Downloads undownloaded episodes one at a time, sequentially.
@@ -210,14 +212,32 @@ class EpisodeDownloadWorker(
                 WatchDownloadStatusReporter.reportStatus(applicationContext)
                 Log.d(TAG, "Downloaded episode ${episode.guid} to ${outFile.absolutePath}")
             } catch (e: Exception) {
+                // The partial file is deliberately kept either way. A retry resumes from
+                // it, and a server that ignores Range makes us discard it anyway.
+                if (isNetworkGone(e)) {
+                    // Not the episode's fault, so do not brand it failed. A sticky error
+                    // outranks every other status the phone can show — including
+                    // "Waiting for Wi-Fi" — so one flaky moment used to leave an episode
+                    // reading "Error" until a human intervened, even once Wi-Fi was back.
+                    //
+                    // The whole run stops: the next episode would fail exactly the same
+                    // way, and each attempt costs another connect timeout.
+                    Log.w(TAG, "Network went away downloading ${episode.guid}; will retry", e)
+                    WatchDownloadStatusReporter.reportStatus(applicationContext)
+                    return if (runAttemptCount >= MAX_NETWORK_RETRIES) {
+                        // Something is wrong beyond a passing blip. Stop burning attempts
+                        // and let the user see it, rather than retrying silently forever.
+                        Log.e(TAG, "Giving up after $runAttemptCount network attempts")
+                        SyncedWatchEpisodes.markError(episode.guid)
+                        WatchDownloadStatusReporter.reportStatus(applicationContext)
+                        Result.failure()
+                    } else {
+                        Result.retry()
+                    }
+                }
+                // A real failure — a bad URL, a 404, a full disk. Mark it and move on;
+                // retry stays an explicit user action.
                 Log.e(TAG, "Failed to download episode ${episode.guid}", e)
-                // The partial file is deliberately kept. A manual retry resumes from it,
-                // and a server that ignores Range makes us discard it anyway.
-                //
-                // No auto-retry: the episode is marked failed and the queue moves on. A
-                // retrying worker used to back off exponentially toward a 5 hour cap
-                // while KEEP silently discarded every new request in the meantime.
-                // Retry is now an explicit user action — long-press the episode.
                 SyncedWatchEpisodes.markError(episode.guid)
                 WatchDownloadStatusReporter.reportStatus(applicationContext)
             }
@@ -226,6 +246,31 @@ class EpisodeDownloadWorker(
         Log.d(TAG, "All episodes downloaded")
         WatchDownloadStatusReporter.reportStatus(applicationContext)
         return Result.success()
+    }
+
+    /**
+     * True when this exception means "the network went away", not "this episode is bad".
+     *
+     * The distinction is the whole point of retrying: a download that died because Wi-Fi
+     * dropped should come back on its own, while a 404 or a full disk should not be
+     * attempted forever. Matched on the exception type rather than the message, since
+     * messages are localised and vary by OEM.
+     *
+     * `SSLException` is included: a connection cut mid-handshake surfaces as one, and it
+     * is not a certificate problem the user could act on either way.
+     */
+    private fun isNetworkGone(e: Throwable): Boolean = when (e) {
+        is java.net.UnknownHostException,
+        is java.net.SocketTimeoutException,
+        is java.net.ConnectException,
+        is java.net.NoRouteToHostException,
+        is java.net.PortUnreachableException,
+        is javax.net.ssl.SSLException,
+        -> true
+        // "Software caused connection abort", "Connection reset" — the generic socket
+        // failure Android raises when the interface disappears underneath a transfer.
+        is java.net.SocketException -> true
+        else -> e.cause?.let { isNetworkGone(it) } ?: false
     }
 
     /**
@@ -325,6 +370,27 @@ class EpisodeDownloadWorker(
         const val UNIQUE_WORK_NAME = "episode-downloads"
 
         /**
+         * Attempts a network failure gets before the episode is marked failed for real.
+         *
+         * Bounded on purpose. Retrying a genuinely unreachable file forever is invisible
+         * to the user and burns battery; six attempts covers a walk out of Wi-Fi range and
+         * back, and anything longer is better shown as an error they can act on.
+         */
+        private const val MAX_NETWORK_RETRIES = 6
+
+        /**
+         * How long WorkManager waits before the first retry, growing linearly.
+         *
+         * Deliberately short and linear. The auto-retry this replaces backed off
+         * exponentially toward a 5 hour cap while `KEEP` discarded every new request in
+         * the meantime — a download could sit dead for hours with the UI saying nothing
+         * (**K6**). Linear 30s tops out near 3 minutes across [MAX_NETWORK_RETRIES], and
+         * the user-initiated triggers use `REPLACE` so they always displace a pending
+         * retry rather than being dropped by it.
+         */
+        private const val RETRY_BACKOFF_SECONDS = 30L
+
+        /**
          * Build a download request honouring the current Wi-Fi-only setting.
          *
          * Every enqueue site goes through here so the constraint cannot drift between
@@ -343,6 +409,11 @@ class EpisodeDownloadWorker(
             }
             return OneTimeWorkRequestBuilder<EpisodeDownloadWorker>()
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(networkType).build())
+                .setBackoffCriteria(
+                    BackoffPolicy.LINEAR,
+                    RETRY_BACKOFF_SECONDS,
+                    TimeUnit.SECONDS,
+                )
                 .apply {
                     if (expedited) setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
                 }
