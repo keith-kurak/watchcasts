@@ -66,6 +66,15 @@ export const MessagePaths = {
    * the next sync simply restores the episode.
    */
   REMOVE_WATCH_EPISODE: "/podcatch/remove-watch-episode",
+  /**
+   * Phone -> watch: "try this failed download again." Payload is the raw episode guid
+   * as UTF-8.
+   *
+   * Clears the episode's sticky error flag and wakes the download worker. Needed because
+   * a failure is deliberately sticky — the worker skips errored episodes until something
+   * clears them — and until now the only thing that could was a long-press on the watch.
+   */
+  RETRY_WATCH_EPISODE: "/podcatch/retry-watch-episode",
 } as const;
 
 /** Keys used inside a DataMap for the SUBSCRIPTIONS data item. */

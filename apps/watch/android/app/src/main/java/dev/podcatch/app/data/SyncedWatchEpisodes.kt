@@ -388,4 +388,21 @@ object SyncedWatchEpisodes {
         }
         persist()
     }
+
+    /**
+     * Clear every failure flag, making the whole queue eligible again.
+     *
+     * Backs the phone's refresh button: "sync" is the obvious thing to reach for when
+     * something is stuck, and having it skip precisely the episodes that need attention
+     * was the wrong reading of the word.
+     *
+     * @return true when anything actually changed, so the caller can skip a needless
+     * re-enqueue and status broadcast.
+     */
+    fun clearAllErrors(): Boolean {
+        if (_episodes.value.none { it.error }) return false
+        _episodes.update { list -> list.map { if (it.error) it.copy(error = false) else it } }
+        persist()
+        return true
+    }
 }

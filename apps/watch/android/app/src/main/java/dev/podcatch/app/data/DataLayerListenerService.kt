@@ -74,9 +74,23 @@ class DataLayerListenerService : WearableListenerService() {
             DataLayerContract.PATH_REQUEST_SYNC -> {
                 Log.d(TAG, "Received force-download request from phone")
                 SyncedWatchEpisodes.load(applicationContext)
+                // Sync is what someone reaches for when a download is stuck, so it clears
+                // failures rather than skipping exactly the episodes that need attention.
+                val cleared = SyncedWatchEpisodes.clearAllErrors()
+                if (cleared) Log.d(TAG, "Cleared download errors ahead of forced sync")
                 WatchDownloadStatusReporter.reportStatus(applicationContext)
-                // Someone pressed sync on the phone and is watching for a result.
-                enqueueDownloads(expedited = true)
+                // Someone pressed sync on the phone and is watching for a result. REPLACE,
+                // not KEEP: a pending retry backoff must not swallow a deliberate request.
+                enqueueDownloads(expedited = true, replaceExisting = true)
+            }
+            DataLayerContract.PATH_RETRY_WATCH_EPISODE -> {
+                val guid = String(messageEvent.data)
+                if (guid.isBlank()) return
+                Log.d(TAG, "Phone asked to retry $guid")
+                SyncedWatchEpisodes.load(applicationContext)
+                SyncedWatchEpisodes.clearError(guid)
+                WatchDownloadStatusReporter.reportStatus(applicationContext)
+                enqueueDownloads(expedited = true, replaceExisting = true)
             }
             DataLayerContract.PATH_REQUEST_DOWNLOAD_STATUS -> {
                 Log.d(TAG, "Received download status request from phone")

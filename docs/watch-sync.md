@@ -73,6 +73,7 @@ Messages are fire-and-forget. They are dropped if the peer is unreachable.
 | `/podcatch/request-sync` | **phone → watch** | empty | `sendForceDownload()` |
 | `/podcatch/request-download-status` | phone → watch | empty | `requestWatchDownloadStatus()` |
 | `/podcatch/watch-download-status` | watch → phone | JSON array | `WatchDownloadStatusReporter` |
+| `/podcatch/retry-watch-episode` | **phone → watch** | episode guid | `retryWatchEpisode()` |
 
 ### Settings
 
@@ -407,34 +408,62 @@ reporter maps to status `downloading` with progress `0`. The phone renders a per
 when progress is `> 0`, so such a download reads as "Downloading…" with no number, and the
 watch shows `…`. Previously it froze at 1% for the entire transfer.
 
-### Failure handling — manual retry only
+### Failure handling — network failures retry, everything else is sticky
 
-Any exception in the download loop:
+An exception in the download loop is sorted by `isNetworkGone()`, which matches on
+exception **type** rather than message (messages are localised and vary by OEM):
+`UnknownHostException`, `SocketTimeoutException`, `ConnectException`,
+`NoRouteToHostException`, `PortUnreachableException`, `SSLException`, `SocketException`,
+and anything wrapping one of those.
 
-1. Calls `markError(guid)`, which also resets `downloadProgress` to `0`
-2. Reports status to the phone
-3. **Continues to the next episode.** The worker still finishes with `success()`
+| Kind | What happens |
+|---|---|
+| Network went away | The episode is **not** marked failed. The run stops and returns `Result.retry()` |
+| Anything else — 404, bad URL, full disk | `markError(guid)`, report, **continue to the next episode**, finish with `success()` |
 
-The partial `.tmp` is deliberately kept so a later attempt can resume from it.
+The partial `.tmp` is kept either way, so a retry resumes from it.
 
-There is **no auto-retry**. A failure is sticky: `error` persists to disk and survives phone
-syncs, so the worker skips that episode until a person clears it.
+The whole run stops on a network failure rather than moving to the next episode: the next
+one would fail identically, and each attempt costs another connect timeout.
 
-This replaced a `Result.retry()` that backed off exponentially toward a 5 hour cap while
-`KEEP` silently discarded every new download request in the meantime.
+**Why network failures are not sticky.** A sticky error outranks every other status the
+phone can show — `ep.error` is checked before `waitingForWifi` in the reporter — so one
+flaky moment left an episode reading "Error" until a human intervened, even after Wi-Fi
+came back. That is not a fact about the episode, and it should not need a person to clear.
 
-**Known trade-off:** losing network mid-queue fails every remaining episode, each needing a
-manual retry. The `NetworkType.CONNECTED` constraint prevents the worker *starting* without
-network, but not losing it mid-run. If this becomes annoying, treat the `IOException`
-subtypes that mean "network went away" as retryable and everything else as a hard error.
+**Why this is not a return of K6.** The auto-retry removed in Phase 3 backed off
+exponentially toward a 5 hour cap while `KEEP` discarded every new request in the meantime,
+so a download could sit dead for hours with the UI saying nothing. Three things keep that
+from recurring:
 
-### Retrying
+- Backoff is `LINEAR` from 30s, topping out near 3 minutes over `MAX_NETWORK_RETRIES` (6).
+- After 6 attempts the episode *is* marked failed, so it surfaces rather than retrying
+  invisibly forever.
+- Every user-initiated trigger enqueues with **`REPLACE`**, not `KEEP` — the phone's
+  refresh, the phone's long-press retry, and the watch's long-press retry. A pending
+  backoff can no longer swallow a deliberate request. Replacing a running worker is safe;
+  partial downloads resume from their `.tmp`.
+
+### Retrying### Retrying
 
 Downloading is automatic. The only manual download action is retrying a failure.
 
-- A failed episode shows a red error icon in the watch list
-- **Long-press** it to open a menu with **Retry download** and **Cancel**
-- Retry calls `SyncedWatchEpisodes.clearError(guid)`, persists, then enqueues the worker
+There are now three ways to clear a failure, because the watch was the only place that
+could and that is the device you are least likely to be holding when you notice:
+
+| Trigger | Effect |
+|---|---|
+| **Watch** long-press → **Retry download** | `clearError(guid)`, then enqueue |
+| **Phone** long-press a failed row → **Retry download** | `/podcatch/retry-watch-episode` with the guid; the watch clears that flag and enqueues |
+| **Phone** refresh button | `/podcatch/request-sync`, which now calls `clearAllErrors()` first |
+
+The refresh button clearing failures is deliberate: sync is what someone reaches for when a
+download is stuck, and having it skip precisely the episodes that need attention was the
+wrong reading of the word.
+
+The phone's long-press offers nothing for a healthy episode — an empty menu is a dead end —
+and applies nothing optimistically. The watch reports its own status back, so if the message
+is lost the row keeps saying Error, which is the truth.
 
 The dialog holds a **snapshot** of the episode, not a `guid` it re-looks-up in `episodes`.
 Removing takes the episode out of the list immediately, so a lookup went `null` while the
@@ -466,10 +495,22 @@ Per episode it derives:
 `0` for anything not yet downloaded, and `0` from watch builds predating the field. The phone
 treats `0` as "unknown" and falls back to the feed-declared size — never as "uses no space".
 
-`waiting-wifi` exists so the phone can say *why* nothing is happening. The watch derives it
-from `SyncedSettings.isWaitingForWifi`, which checks `NET_CAPABILITY_NOT_METERED` — the same
-signal WorkManager's `UNMETERED` constraint uses, so the reported status and the constraint
-that actually gates the work cannot disagree.
+`waiting-wifi` exists so the phone can say *why* nothing is happening. Two independent
+signals produce it, and both are needed:
+
+1. `SyncedSettings.isWaitingForWifi` — `NET_CAPABILITY_NOT_METERED` is missing. The same
+   signal WorkManager's `UNMETERED` constraint uses, so the reported status and the
+   constraint that gates the work cannot disagree.
+2. `HighBandwidthNetwork.lastAcquireFailed(context)` — an actual acquire attempt found no
+   fast network. **The metered check cannot catch this**, because the Bluetooth companion
+   proxy reports `NOT_METERED`: with no Wi-Fi anywhere, signal 1 cheerfully says "unmetered,
+   all good".
+
+Signal 2 is **persisted** (`SharedPreferences("network-state")`). Wear kills processes
+constantly, and the reporter usually runs in a *different* process from the worker that did
+the trying — `DataLayerListenerService` starts a fresh one. Held only in memory, the fact
+evaporated between the two and the phone was told `pending`, rendering as "Waiting…", when
+the watch had already established there was no Wi-Fi to be had. Reported from the field.
 
 It is called after every meaningful state transition: list update, download start, each ~5% step, completion, failure, and on request from the phone.
 
@@ -721,6 +762,8 @@ Open defects. Each is a real, reproducible cause of user-visible breakage.
 | ~~K17~~ | `POST_NOTIFICATIONS` was declared but never requested, so the foreground service ran with its notification suppressed. Phase 2 verified `isForeground=true`, which does not imply a visible notification | High-bandwidth network |
 | ~~K18~~ | Removing on the watch was fire-and-forget. A lost request — phone out of range, or in range with its app closed — meant the next sync restored the episode and downloaded it again | Durable removal |
 | ~~K19~~ | The long-press dialog looked its episode up by guid, so removing it flashed the "not downloaded / Retry" variant during the exit animation | Durable removal |
+| ~~K23~~ | `lastAcquireFailed` was in-memory and process-scoped, so the status reporter — usually a different process — never saw it. A download with no Wi-Fi anywhere showed "Waiting…", never "Waiting for Wi-Fi" | Retry and reachability |
+| ~~K24~~ | A transient network failure marked the episode errored, and `error` outranks `waiting-wifi` in the reporter, so it read "Error" forever — including after Wi-Fi returned | Retry and reachability |
 
 ### Medium — correctness
 

@@ -55,6 +55,13 @@ declare class WearDataLayerModule extends NativeModule<WearDataLayerModuleEvents
   getConnectedNodes(): Promise<WearNode[]>;
   requestWatchDownloadStatus(): Promise<void>;
   /**
+   * Ask the watch to retry one failed download.
+   *
+   * Clears that episode's sticky error flag on the watch and wakes its worker. A failure
+   * is sticky by design, so without this the only way back was a long-press on the watch.
+   */
+  retryWatchEpisode(guid: string): Promise<void>;
+  /**
    * Re-emit `onWatchPlaybackProgress` from the watch's already-replicated data item.
    *
    * Call it after subscribing. The listener only sees changes made while this app is

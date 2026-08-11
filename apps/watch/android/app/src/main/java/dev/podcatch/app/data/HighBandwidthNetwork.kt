@@ -39,17 +39,40 @@ object HighBandwidthNetwork {
      */
     private const val ACQUIRE_TIMEOUT_MS = 45_000
 
+    private const val PREFS_NAME = "network-state"
+    private const val KEY_ACQUIRE_FAILED = "lastAcquireFailed"
+
     /**
      * True when the last [acquire] call could not get a high-bandwidth network.
      *
      * Read by [WatchDownloadStatusReporter] so the phone can say *why* nothing is
-     * downloading. In-memory and process-scoped on purpose: it describes what this process
-     * just tried, not a durable fact about the watch. A fresh process reports `false`,
-     * which reads as "pending" — honest, since it has not tried yet.
+     * downloading.
+     *
+     * **Persisted**, and that matters more than it looks. Wear kills processes constantly,
+     * and the status reporter usually runs in a *different* process from the worker that
+     * did the trying — `DataLayerListenerService` starts a fresh one. Held in memory, this
+     * evaporated between the two, so the phone was told `pending` ("Waiting…") when the
+     * watch had already established there was no Wi-Fi to be had. Reported from the field:
+     * a download with no Wi-Fi anywhere showed "Waiting…", never "Waiting for Wi-Fi".
      */
     @Volatile
-    var lastAcquireFailed = false
-        private set
+    private var cachedAcquireFailed: Boolean? = null
+
+    fun lastAcquireFailed(context: Context): Boolean {
+        cachedAcquireFailed?.let { return it }
+        val stored = prefs(context).getBoolean(KEY_ACQUIRE_FAILED, false)
+        cachedAcquireFailed = stored
+        return stored
+    }
+
+    private fun setAcquireFailed(context: Context, failed: Boolean) {
+        if (cachedAcquireFailed == failed) return
+        cachedAcquireFailed = failed
+        prefs(context).edit().putBoolean(KEY_ACQUIRE_FAILED, failed).apply()
+    }
+
+    private fun prefs(context: Context) = context.applicationContext
+        .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     /**
      * A held network request. Keeping it registered is what keeps Wi-Fi up, so it lives as
@@ -104,7 +127,7 @@ object HighBandwidthNetwork {
                 override fun onAvailable(network: Network) {
                     if (!settled.compareAndSet(false, true)) return
                     Log.d(TAG, "Acquired high-bandwidth network")
-                    lastAcquireFailed = false
+                    setAcquireFailed(context, false)
                     // The callback stays registered: unregistering here would drop the
                     // network we just asked for. The Lease owns it now.
                     continuation.resume(Lease(manager, this, network))
@@ -113,7 +136,7 @@ object HighBandwidthNetwork {
                 override fun onUnavailable() {
                     if (!settled.compareAndSet(false, true)) return
                     Log.w(TAG, "No high-bandwidth network became available")
-                    lastAcquireFailed = true
+                    setAcquireFailed(context, true)
                     runCatching { manager.unregisterNetworkCallback(this) }
                     continuation.resume(null)
                 }
@@ -125,7 +148,7 @@ object HighBandwidthNetwork {
                 // CHANGE_NETWORK_STATE is missing from the manifest.
                 if (settled.compareAndSet(false, true)) {
                     Log.e(TAG, "requestNetwork denied; CHANGE_NETWORK_STATE not granted", e)
-                    lastAcquireFailed = true
+                    setAcquireFailed(context, true)
                     continuation.resume(null)
                 }
                 return@suspendCancellableCoroutine

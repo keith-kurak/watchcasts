@@ -5,6 +5,7 @@ import { Stack, useRouter } from 'expo-router';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, StyleSheet, View } from 'react-native';
 
+import { RetryDialog } from '@/components/retry-dialog';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { NowPlayingBarHeight, Spacing } from '@/constants/theme';
@@ -13,7 +14,12 @@ import { useTheme } from '@/hooks/use-theme';
 import { formatBytes, formatDate, formatDuration } from '@/lib/format';
 import { useWatchListQuery, useWatchListMutations, type EnrichedDownloadItem } from '@/lib/queries';
 import { getSubscriptions } from '@/lib/storage';
-import { getConnectedNodes, sendForceDownload, requestWatchDownloadStatus } from '@/hooks/useWearDataLayer';
+import {
+  getConnectedNodes,
+  sendForceDownload,
+  requestWatchDownloadStatus,
+  retryWatchEpisode,
+} from '@/hooks/useWearDataLayer';
 import { useWatchStatuses } from '@/lib/watch-status-context';
 import type { WatchEpisodeStatus } from '../../../../modules/wear-data-layer/src';
 
@@ -25,9 +31,11 @@ const ESTIMATED_ROW_HEIGHT = 76;
 const WatchRow = memo(function WatchRow({
   item,
   watchStatus,
+  onLongPress,
 }: {
   item: EnrichedDownloadItem;
   watchStatus: WatchEpisodeStatus | undefined;
+  onLongPress: () => void;
 }) {
   const router = useRouter();
   const theme = useTheme();
@@ -44,6 +52,7 @@ const WatchRow = memo(function WatchRow({
   return (
     <Pressable
       style={styles.episodeRow}
+      onLongPress={onLongPress}
       onPress={() =>
         router.push({
           pathname: '/(tabs)/(watch)/episode/[episodeId]',
@@ -122,6 +131,31 @@ export default function WatchScreen() {
   const { triggerSync } = useWatchListMutations();
   const [connected, setConnected] = useState<boolean | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  // A snapshot, not a guid to re-look-up. Retrying flips the status immediately, and a
+  // lookup would go undefined underneath the dialog as it animates out.
+  const [retryItem, setRetryItem] = useState<EnrichedDownloadItem | null>(null);
+  const [retryVisible, setRetryVisible] = useState(false);
+
+  const handleLongPress = useCallback(
+    (item: EnrichedDownloadItem) => {
+      // Only a failed download has anything to offer here. Opening an empty menu on a
+      // healthy episode would be a dead end.
+      if (watchStatuses.get(item.episodeGuid)?.status !== 'error') return;
+      setRetryItem(item);
+      setRetryVisible(true);
+    },
+    [watchStatuses],
+  );
+
+  const confirmRetry = useCallback(() => {
+    const guid = retryItem?.episodeGuid;
+    if (guid) {
+      retryWatchEpisode(guid).catch(() => {});
+      // The watch reports its own status back, which is what actually updates the row.
+      // Nothing optimistic here: if the message is lost the row must keep saying Error.
+    }
+    setRetryVisible(false);
+  }, [retryItem]);
 
   const listRef = useRef<LegendListRef>(null);
   const hasActiveDownload = watchList.some(
@@ -202,7 +236,11 @@ export default function WatchScreen() {
         onRefresh={() => refetch()}
         contentContainerStyle={styles.list}
         renderItem={({ item }) => (
-          <WatchRow item={item} watchStatus={watchStatuses.get(item.episodeGuid)} />
+          <WatchRow
+            item={item}
+            watchStatus={watchStatuses.get(item.episodeGuid)}
+            onLongPress={() => handleLongPress(item)}
+          />
         )}
         ListEmptyComponent={
           isLoading ? null : (
@@ -211,6 +249,13 @@ export default function WatchScreen() {
             </ThemedText>
           )
         }
+      />
+
+      <RetryDialog
+        visible={retryVisible}
+        episodeTitle={retryItem?.episode.title ?? ''}
+        onConfirm={confirmRetry}
+        onDismiss={() => setRetryVisible(false)}
       />
     </ThemedView>
   );

@@ -365,7 +365,10 @@ private fun retryEpisodeDownload(context: android.content.Context, episode: Watc
 
     WorkManager.getInstance(context).enqueueUniqueWork(
         EpisodeDownloadWorker.UNIQUE_WORK_NAME,
-        ExistingWorkPolicy.KEEP,
+        // REPLACE, not KEEP: a network failure now schedules a retry with a backoff, and
+        // KEEP would let that pending retry silently swallow the tap. Replacing a running
+        // worker is safe — partial downloads resume from their `.tmp`.
+        ExistingWorkPolicy.REPLACE,
         // User-initiated and the user is watching the screen — worth expedited quota.
         EpisodeDownloadWorker.buildRequest(context, expedited = true),
     )

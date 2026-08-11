@@ -166,6 +166,37 @@ class WearDataLayerModule :
                 }
         }
 
+        AsyncFunction("retryWatchEpisode") { guid: String, promise: Promise ->
+            val context = appContext.reactContext
+                ?: return@AsyncFunction promise.reject("ERR", "No context", null)
+            if (guid.isBlank()) return@AsyncFunction promise.resolve(null)
+            val nodeClient = Wearable.getNodeClient(context)
+            val msgClient = Wearable.getMessageClient(context)
+            val payload = guid.toByteArray()
+            nodeClient.connectedNodes
+                .addOnSuccessListener { nodes: MutableList<Node> ->
+                    if (nodes.isEmpty()) {
+                        promise.resolve(null)
+                        return@addOnSuccessListener
+                    }
+                    var pending = nodes.size
+                    for (node in nodes) {
+                        msgClient.sendMessage(node.id, PATH_RETRY_WATCH_EPISODE, payload)
+                            .addOnSuccessListener {
+                                Log.d(TAG, "Asked ${node.displayName} to retry $guid")
+                                if (--pending == 0) promise.resolve(null)
+                            }
+                            .addOnFailureListener { e ->
+                                Log.e(TAG, "Failed to ask ${node.displayName} to retry", e)
+                                if (--pending == 0) promise.resolve(null)
+                            }
+                    }
+                }
+                .addOnFailureListener { e ->
+                    promise.reject("ERR", e.message ?: "getConnectedNodes failed", e)
+                }
+        }
+
         AsyncFunction("requestWatchDownloadStatus") { promise: Promise ->
             val context = appContext.reactContext
                 ?: return@AsyncFunction promise.reject("ERR", "No context", null)
@@ -310,6 +341,7 @@ class WearDataLayerModule :
         private const val PATH_REQUEST_DOWNLOAD_STATUS = "/podcatch/request-download-status"
         private const val PATH_WATCH_DOWNLOAD_STATUS = "/podcatch/watch-download-status"
         private const val PATH_REMOVE_WATCH_EPISODE = "/podcatch/remove-watch-episode"
+        private const val PATH_RETRY_WATCH_EPISODE = "/podcatch/retry-watch-episode"
         private const val PATH_PLAYBACK_PROGRESS_PHONE = "/podcatch/playback-progress/phone"
         private const val PATH_PLAYBACK_PROGRESS_WATCH = "/podcatch/playback-progress/watch"
         private const val KEY_ITEMS = "items"
