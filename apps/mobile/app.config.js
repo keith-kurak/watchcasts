@@ -68,11 +68,11 @@ module.exports = ({ config }) => ({
     [
       "expo-build-properties",
       {
-        usePrecompiledModules: true,
         android: {
           // Android 12+ only. Expo's default is 24 (Android 7.0); this is a
           // deliberate floor, not an inherited value.
           minSdkVersion: 31,
+          usePrecompiledModules: true,
         },
       },
     ],

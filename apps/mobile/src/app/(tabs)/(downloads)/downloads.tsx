@@ -1,9 +1,9 @@
 import { LegendList, type LegendListRef } from '@legendapp/list/react-native';
-import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useRef } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import { Image } from '@/components/image';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { NowPlayingBarHeight, Spacing } from '@/constants/theme';
@@ -12,7 +12,6 @@ import { useTheme } from '@/hooks/use-theme';
 import { useDownloadContext } from '@/lib/download-context';
 import { formatBytes, formatDate, formatDuration } from '@/lib/format';
 import { useDownloadsQuery, type EnrichedDownloadItem } from '@/lib/queries';
-import { getSubscriptions } from '@/lib/storage';
 
 const ESTIMATED_ROW_HEIGHT = 76;
 
@@ -92,8 +91,7 @@ function DownloadRow({ item }: { item: EnrichedDownloadItem }) {
 }
 
 export default function DownloadsScreen() {
-  const subscriptions = getSubscriptions();
-  const { data: downloads = [], isLoading, refetch, isRefetching } = useDownloadsQuery(subscriptions);
+  const { data: downloads = [], isLoading, refetch, isRefetching } = useDownloadsQuery();
   const { getProgress } = useDownloadContext();
 
   const listRef = useRef<LegendListRef>(null);

@@ -49,11 +49,17 @@ export interface EnrichedDownloadItem {
   sizeBytes?: number;
 }
 
-export function useDownloadsQuery(subscriptions: Podcast[]) {
+export function useDownloadsQuery() {
   return useQuery({
     queryKey: ['downloads'],
     queryFn: () => {
       const downloads = getDownloads();
+      // Read subscriptions here rather than taking them as an argument. The query
+      // key is just ['downloads'], so a caller-supplied array would be captured
+      // once and then reused on every later run — a podcast subscribed to during
+      // this session would be missing from it, and the join below would silently
+      // yield undefined, dropping the row's artwork and podcast title.
+      const subscriptions = getSubscriptions();
       const items: EnrichedDownloadItem[] = [];
       for (const di of downloads) {
         const episodes = getCachedEpisodes(di.podcastId);
@@ -122,11 +128,13 @@ export function useDownloadMutations() {
   return { add, remove };
 }
 
-export function useWatchListQuery(subscriptions: Podcast[]) {
+export function useWatchListQuery() {
   return useQuery({
     queryKey: ['watchList'],
     queryFn: () => {
       const list = getWatchList();
+      // Read fresh, for the same reason as useDownloadsQuery above.
+      const subscriptions = getSubscriptions();
       const items: EnrichedDownloadItem[] = [];
       for (const wi of list) {
         const episodes = getCachedEpisodes(wi.podcastId);

@@ -8,6 +8,7 @@ import {
 } from 'expo-network';
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 
+import { HTTP_HEADERS } from './http';
 import {
   episodesDir,
   getCachedEpisodes,
@@ -84,6 +85,7 @@ export function DownloadProvider({ children }: { children: React.ReactNode }) {
       invalidate();
 
       const task = new DownloadTask(audioUrl, destFile, {
+        headers: HTTP_HEADERS,
         onProgress: (progress) => {
           const fraction =
             progress.totalBytes > 0 ? progress.bytesWritten / progress.totalBytes : 0;

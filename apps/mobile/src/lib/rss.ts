@@ -1,5 +1,6 @@
 import { XMLParser } from 'fast-xml-parser';
 
+import { HTTP_HEADERS } from './http';
 import type { Episode, Podcast } from './types';
 
 // An RSS feed returns every episode in one document, so this is only an upper
@@ -39,6 +40,7 @@ export function parseApplePodcastsId(url: string): string | null {
 export async function lookupAppleFeedUrl(showId: string): Promise<string> {
   const res = await fetch(
     `https://itunes.apple.com/lookup?id=${encodeURIComponent(showId)}&entity=podcast`,
+    { headers: HTTP_HEADERS },
   );
   if (!res.ok) throw new Error(`Apple Podcasts lookup failed: ${res.status}`);
 
@@ -60,7 +62,7 @@ export async function resolveFeedUrl(input: string): Promise<string> {
 export async function fetchFeed(
   url: string,
 ): Promise<{ podcast: Podcast; episodes: Episode[] }> {
-  const res = await fetch(url);
+  const res = await fetch(url, { headers: HTTP_HEADERS });
   if (!res.ok) throw new Error(`Feed fetch failed: ${res.status}`);
   const xml = await res.text();
 

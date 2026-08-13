@@ -1,10 +1,10 @@
 import { LegendList, type LegendListRef } from '@legendapp/list/react-native';
-import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
 import { Stack, useRouter } from 'expo-router';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, StyleSheet, View } from 'react-native';
 
+import { Image } from '@/components/image';
 import { RetryDialog } from '@/components/retry-dialog';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -13,7 +13,6 @@ import { useScrollToActiveDownload } from '@/hooks/use-scroll-to-active-download
 import { useTheme } from '@/hooks/use-theme';
 import { formatBytes, formatDate, formatDuration } from '@/lib/format';
 import { useWatchListQuery, useWatchListMutations, type EnrichedDownloadItem } from '@/lib/queries';
-import { getSubscriptions } from '@/lib/storage';
 import {
   getConnectedNodes,
   sendForceDownload,
@@ -125,9 +124,8 @@ const WatchRow = memo(function WatchRow({
 export default function WatchScreen() {
   const router = useRouter();
   const theme = useTheme();
-  const subscriptions = getSubscriptions();
   const watchStatuses = useWatchStatuses();
-  const { data: watchList = [], isLoading, refetch, isRefetching } = useWatchListQuery(subscriptions);
+  const { data: watchList = [], isLoading, refetch, isRefetching } = useWatchListQuery();
   const { triggerSync } = useWatchListMutations();
   const [connected, setConnected] = useState<boolean | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
