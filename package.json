@@ -12,6 +12,9 @@
     "mobile:android": "bun --filter @podcatch/mobile android",
     "mobile:ios": "bun --filter @podcatch/mobile ios",
     "watch": "./apps/watch/install.sh",
+    "build:preview": "bun run --cwd apps/mobile build-apk -- --no-wait && bun run --cwd apps/watch build-apk -- --no-wait",
+    "build:preview:mobile": "bun run --cwd apps/mobile build-apk -- --no-wait",
+    "build:preview:watch": "bun run --cwd apps/watch build-apk -- --no-wait",
     "typecheck": "bun --filter '*' typecheck"
   }
 }

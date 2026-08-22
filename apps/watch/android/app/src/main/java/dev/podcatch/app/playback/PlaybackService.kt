@@ -2,15 +2,21 @@ package dev.podcatch.app.playback
 
 import android.content.Context
 import android.content.Intent
+import android.os.Bundle
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
 import androidx.media3.ui.WearUnsuitableOutputPlaybackSuppressionResolverListener
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -18,6 +24,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import dev.podcatch.app.R
 import dev.podcatch.app.data.PlaybackProgressSync
 import dev.podcatch.app.data.SyncedWatchEpisodes
 import dev.podcatch.app.data.UpNextQueue
@@ -130,6 +137,68 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
+    /**
+     * Seek buttons for the system media controls.
+     *
+     * These must be backed by [SessionCommand]s, not by `Player.COMMAND_SEEK_FORWARD` /
+     * `COMMAND_SEEK_BACK`. Those player commands were already available — the legacy
+     * `PlaybackState` has advertised REWIND and FAST_FORWARD all along — and the Wear
+     * media controls app ignores them. It only draws extra buttons from the session's
+     * *custom actions*, which a player-command button does not produce.
+     *
+     * Order matters, and slots do not. The Wear app takes custom actions in list order:
+     * the first replaces its "Next" button, and every later one is buried in the
+     * "More Actions" overflow. It pays no attention to [CommandButton.setSlots], so
+     * forward goes first — a backward jump sitting where "Next" used to be reads wrong.
+     * The slot hints stay for other surfaces that do honour them, such as the phone.
+     *
+     * The handlers call `seekBack()`/`seekForward()`, so the distance comes from the
+     * increments set on the player and stays defined in one place.
+     */
+    private fun seekButtons(): List<CommandButton> = listOf(
+        CommandButton.Builder(CommandButton.ICON_SKIP_FORWARD_30)
+            .setSessionCommand(SessionCommand(ACTION_SEEK_FORWARD, Bundle.EMPTY))
+            .setSlots(CommandButton.SLOT_FORWARD)
+            .setDisplayName(getString(R.string.seek_forward))
+            .build(),
+        CommandButton.Builder(CommandButton.ICON_SKIP_BACK_10)
+            .setSessionCommand(SessionCommand(ACTION_SEEK_BACK, Bundle.EMPTY))
+            .setSlots(CommandButton.SLOT_BACK)
+            .setDisplayName(getString(R.string.seek_back))
+            .build(),
+    )
+
+    /** Accepts the two seek commands and runs them against the player. */
+    private inner class SessionCallback : MediaSession.Callback {
+        override fun onConnect(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+        ): MediaSession.ConnectionResult {
+            val commands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon()
+                .add(SessionCommand(ACTION_SEEK_BACK, Bundle.EMPTY))
+                .add(SessionCommand(ACTION_SEEK_FORWARD, Bundle.EMPTY))
+                .build()
+            return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                .setAvailableSessionCommands(commands)
+                .build()
+        }
+
+        override fun onCustomCommand(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            customCommand: SessionCommand,
+            args: Bundle,
+        ): ListenableFuture<SessionResult> {
+            // seekBack/seekForward use the increments configured on the player, so the
+            // distance stays defined in exactly one place.
+            when (customCommand.customAction) {
+                ACTION_SEEK_BACK -> session.player.seekBack()
+                ACTION_SEEK_FORWARD -> session.player.seekForward()
+            }
+            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         PlaybackState.init(this)
@@ -139,8 +208,8 @@ class PlaybackService : MediaSessionService() {
         observeSeekRequests()
 
         val player = ExoPlayer.Builder(this)
-            .setSeekForwardIncrementMs(30_000L)
-            .setSeekBackIncrementMs(10_000L)
+            .setSeekForwardIncrementMs(SEEK_FORWARD_MS)
+            .setSeekBackIncrementMs(SEEK_BACK_MS)
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)
@@ -208,7 +277,10 @@ class PlaybackService : MediaSessionService() {
                 })
             }
 
-        mediaSession = MediaSession.Builder(this, player).build()
+        mediaSession = MediaSession.Builder(this, player)
+            .setCustomLayout(seekButtons())
+            .setCallback(SessionCallback())
+            .build()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
@@ -260,6 +332,16 @@ class PlaybackService : MediaSessionService() {
     companion object {
         /** Live UI cadence. Persistence stays on its own slower interval. */
         private const val POSITION_TICK_MS = 1_000L
+
+        // Seek distances. Named because two things depend on each of them: the player's
+        // increment, and the icon the media controls draw (ICON_SKIP_BACK_10 /
+        // ICON_SKIP_FORWARD_30). Change one of these and its icon has to change with it,
+        // or the button will lie about what it does.
+        private const val SEEK_BACK_MS = 10_000L
+        private const val SEEK_FORWARD_MS = 30_000L
+
+        private const val ACTION_SEEK_BACK = "dev.podcatch.app.action.SEEK_BACK"
+        private const val ACTION_SEEK_FORWARD = "dev.podcatch.app.action.SEEK_FORWARD"
 
         fun intent(context: Context) = Intent(context, PlaybackService::class.java)
     }
