@@ -1,11 +1,11 @@
 import { LegendList } from '@legendapp/list/react-native';
 import { useQueryClient } from '@tanstack/react-query';
-import { Image } from 'expo-image';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { DownloadToggle } from '@/components/download-toggle';
+import { Image } from '@/components/image';
 import { RemoveDialog } from '@/components/remove-dialog';
 import { WatchToggle } from '@/components/watch-toggle';
 import { ThemedText } from '@/components/themed-text';

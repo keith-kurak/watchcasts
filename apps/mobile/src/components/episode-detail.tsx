@@ -3,12 +3,12 @@ import { Slider } from '@expo/ui/community/slider';
 import { Host, Slider as ComposeSlider } from '@expo/ui/jetpack-compose';
 import { fillMaxWidth } from '@expo/ui/jetpack-compose/modifiers';
 import { useAudioPlayerStatus } from 'expo-audio';
-import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
 import { useCallback, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { DownloadToggle } from '@/components/download-toggle';
+import { Image } from '@/components/image';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { WatchToggle } from '@/components/watch-toggle';

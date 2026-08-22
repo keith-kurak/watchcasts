@@ -1,6 +1,5 @@
 import { LegendList } from '@legendapp/list/react-native';
 import { FloatingActionButton, Host, Icon } from '@expo/ui/jetpack-compose';
-import { Image } from 'expo-image';
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
@@ -13,6 +12,7 @@ import {
   View,
 } from 'react-native';
 
+import { Image } from '@/components/image';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors, Spacing } from '@/constants/theme';

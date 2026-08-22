@@ -1,10 +1,10 @@
 import { useAudioPlayerStatus } from 'expo-audio';
-import { Image } from 'expo-image';
 import { useRouter, useSegments, useGlobalSearchParams } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Image } from '@/components/image';
 import { ThemedText } from '@/components/themed-text';
 import { BottomTabInset, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
