@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { Dimensions, StyleSheet, View } from 'react-native';
+import { Dimensions, StyleSheet, useColorScheme, View } from 'react-native';
 import Animated, { Easing, Keyframe } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 
+import splashColors from '../../splash-colors.json';
 import { Image } from './image';
 
 const INITIAL_SCALE_FACTOR = Dimensions.get('screen').height / 90;
@@ -10,6 +11,12 @@ const DURATION = 600;
 
 export function AnimatedSplashOverlay() {
   const [visible, setVisible] = useState(true);
+  // Same colours the native splash uses, from the same file, so this overlay is
+  // indistinguishable from the screen it takes over from. Read here rather than from the
+  // app theme: the theme's light background is white, and a white flash between a cream
+  // native splash and the first screen is exactly what this is meant to hide.
+  const scheme = useColorScheme();
+  const backgroundColor = scheme === 'dark' ? splashColors.dark : splashColors.light;
 
   if (!visible) return null;
 
@@ -40,7 +47,7 @@ export function AnimatedSplashOverlay() {
           scheduleOnRN(setVisible, false);
         }
       })}
-      style={styles.backgroundSolidColor}
+      style={[styles.backgroundSolidColor, { backgroundColor }]}
     />
   );
 }
@@ -127,7 +134,6 @@ const styles = StyleSheet.create({
   },
   backgroundSolidColor: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: '#208AEF',
     zIndex: 1000,
   },
 });
