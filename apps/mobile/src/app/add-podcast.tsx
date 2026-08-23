@@ -14,6 +14,7 @@ import { Image } from '@/components/image';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors, Spacing } from '@/constants/theme';
+import { useMaterialColors } from '@expo/ui/jetpack-compose';
 import { fetchFeed, resolveFeedUrl } from '@/lib/rss';
 import { addSubscription, getSubscriptions, setCachedEpisodes } from '@/lib/storage';
 import type { Episode, Podcast } from '@/lib/types';
@@ -34,6 +35,7 @@ export default function AddPodcastScreen() {
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
 
+  const material = useMaterialColors();
   const [feedUrl, setFeedUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -112,10 +114,11 @@ export default function AddPodcastScreen() {
             accessibilityLabel={alreadySubscribed ? 'Already subscribed' : 'Subscribe'}
             style={({ pressed }) => [
               styles.primaryButton,
+              { backgroundColor: material.primary },
               alreadySubscribed && styles.buttonDisabled,
               pressed && !alreadySubscribed && styles.pressed,
             ]}>
-            <ThemedText style={styles.primaryButtonText}>
+            <ThemedText style={[styles.primaryButtonText, { color: material.onPrimary }]}>
               {alreadySubscribed ? 'Already subscribed' : 'Subscribe'}
             </ThemedText>
           </Pressable>
@@ -160,7 +163,7 @@ export default function AddPodcastScreen() {
           />
 
           {error && (
-            <ThemedText type="small" style={styles.errorText}>
+            <ThemedText type="small" style={[styles.errorText, { color: material.error }]}>
               {error}
             </ThemedText>
           )}
@@ -172,13 +175,16 @@ export default function AddPodcastScreen() {
             accessibilityLabel="Find podcast"
             style={({ pressed }) => [
               styles.primaryButton,
+              { backgroundColor: material.primary },
               !canSearch && styles.buttonDisabled,
               pressed && canSearch && styles.pressed,
             ]}>
             {loading ? (
-              <ActivityIndicator color="#fff" size="small" />
+              <ActivityIndicator color={material.onPrimary} size="small" />
             ) : (
-              <ThemedText style={styles.primaryButtonText}>Find podcast</ThemedText>
+              <ThemedText style={[styles.primaryButtonText, { color: material.onPrimary }]}>
+                Find podcast
+              </ThemedText>
             )}
           </Pressable>
         </View>
@@ -215,19 +221,16 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   errorText: {
-    color: '#FF3B30',
     alignSelf: 'stretch',
   },
   primaryButton: {
     alignSelf: 'stretch',
     height: 48,
     borderRadius: Spacing.two,
-    backgroundColor: '#208AEF',
     alignItems: 'center',
     justifyContent: 'center',
   },
   primaryButtonText: {
-    color: '#fff',
     fontWeight: '600',
   },
   secondaryButton: {

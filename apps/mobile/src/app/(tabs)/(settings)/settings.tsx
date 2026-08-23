@@ -11,11 +11,11 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   useColorScheme,
   View,
 } from 'react-native';
 
+import { MaterialSwitch } from '@/components/material-switch';
 import { StorageLimitRow } from '@/components/storage-limit-row';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -227,7 +227,7 @@ export default function SettingsScreen() {
               Applies to this phone and your watch. Episodes will wait to download until a Wi-Fi connection is available.
             </ThemedText>
           </View>
-          <Switch value={wifiOnly} onValueChange={handleWifiOnlyChange} />
+          <MaterialSwitch value={wifiOnly} onValueChange={handleWifiOnlyChange} />
         </View>
 
         <ThemedText
@@ -252,7 +252,7 @@ export default function SettingsScreen() {
               around. An episode that is playing right now is never moved.
             </ThemedText>
           </View>
-          <Switch value={syncProgress} onValueChange={handleSyncProgressChange} />
+          <MaterialSwitch value={syncProgress} onValueChange={handleSyncProgressChange} />
         </View>
 
         <ThemedText

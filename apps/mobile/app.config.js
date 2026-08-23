@@ -76,6 +76,10 @@ module.exports = ({ config }) => ({
         },
       },
     ],
+    // Material You for the views AppCompat draws (text cursor, selection handles,
+    // native ripples). minSdkVersion 31 above means the dynamic palette is always
+    // available, so this never falls back to the Material 3 baseline.
+    "./plugins/with-material3-dynamic-colors",
   ],
   experiments: {
     typedRoutes: true,

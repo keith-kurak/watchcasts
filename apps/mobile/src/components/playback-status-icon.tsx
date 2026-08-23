@@ -1,6 +1,7 @@
 import { SymbolView } from 'expo-symbols';
 import { StyleSheet, View } from 'react-native';
 
+import { useStatusColors } from '@/hooks/use-status-colors';
 import { useAudio, useAudioStatus } from '@/lib/audio-context';
 import { getPlaybackProgress } from '@/lib/storage';
 
@@ -43,12 +44,16 @@ export function usePlaybackState(
   return 'not_started';
 }
 
-const STATE_COLORS: Record<PlaybackState, string> = {
-  downloading: '#8E8E93',
-  not_started: '#34C759',
-  in_progress: '#FF9F0A',
-  completed: '#8E8E93',
-};
+/** Maps each state onto a Material role. See `useStatusColors` for the reasoning. */
+function useStateColors(): Record<PlaybackState, string> {
+  const status = useStatusColors();
+  return {
+    downloading: status.idle,
+    not_started: status.success,
+    in_progress: status.waiting,
+    completed: status.idle,
+  };
+}
 
 interface PhoneStatusIconProps {
   episodeGuid: string;
@@ -62,7 +67,7 @@ export function PhoneStatusIcon({
   size = 24,
 }: PhoneStatusIconProps) {
   const state = usePlaybackState(episodeGuid, downloadStatus);
-  const color = STATE_COLORS[state];
+  const color = useStateColors()[state];
 
   if (state === 'completed') {
     return (
@@ -99,7 +104,7 @@ export function WatchStatusIcon({
   size = 24,
 }: WatchStatusIconProps) {
   const state = usePlaybackState(episodeGuid, downloadStatus);
-  const color = STATE_COLORS[state];
+  const color = useStateColors()[state];
 
   if (state === 'completed') {
     return (
