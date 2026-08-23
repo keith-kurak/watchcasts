@@ -30,14 +30,6 @@ export const STARTER_PODCASTS = [
     name: 'Talking Simpsons',
     feedUrl: 'https://rss.libsyn.com/shows/73326/destinations/317509.xml',
   },
-  // Buzzsprout-hosted, and deliberately so. Buzzsprout's WAF 403s the default
-  // OkHttp User-Agent, which broke every Buzzsprout show until `USER_AGENT` was
-  // added in lib/http.ts. Keeping one such feed here means a regression shows up
-  // on a fresh install rather than only for users who add their own shows.
-  {
-    name: 'The Sacred Slope',
-    feedUrl: 'https://rss.buzzsprout.com/2471756.rss',
-  },
 ] as const;
 
 export interface StarterResult {
