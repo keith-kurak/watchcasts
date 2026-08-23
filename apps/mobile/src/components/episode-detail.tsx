@@ -3,6 +3,7 @@ import { Slider } from '@expo/ui/community/slider';
 import { Host, Slider as ComposeSlider } from '@expo/ui/jetpack-compose';
 import { fillMaxWidth } from '@expo/ui/jetpack-compose/modifiers';
 import { useAudioPlayerStatus } from 'expo-audio';
+import { ObserveInteractiveMarker } from 'expo-observe';
 import { SymbolView } from 'expo-symbols';
 import { useCallback, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
@@ -78,6 +79,13 @@ export function EpisodeDetail({ episodeId, podcastId }: EpisodeDetailProps) {
 
   return (
     <ThemedView style={styles.container}>
+      {/*
+        Marks TTI for whichever of the three episode routes rendered this — the router
+        integration attributes it from the current route, so one marker covers all of
+        them. Below the not-found branch on purpose: a screen that failed to find its
+        episode never became interactive, and marking it would flatter the metric.
+      */}
+      <ObserveInteractiveMarker />
       <ScrollView contentContainerStyle={styles.content}>
         {imageUri && (
           <Image source={{ uri: imageUri }} style={styles.image} contentFit="cover" />

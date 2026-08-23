@@ -1,5 +1,6 @@
 import { LegendList } from '@legendapp/list/react-native';
 import { useQueryClient } from '@tanstack/react-query';
+import { ObserveInteractiveMarker } from 'expo-observe';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
@@ -52,6 +53,12 @@ export default function PodcastScreen() {
 
   return (
     <ThemedView style={styles.container}>
+      {/*
+        TTI for this route, once there are episodes to show. `useFeedQuery` seeds itself
+        from the cached episodes, so on a revisit this is the first render and the metric
+        stays honest about how quickly the screen was usable.
+      */}
+      {!isLoading && <ObserveInteractiveMarker />}
       {/*
         `Stack.Title` rather than `Stack.Screen options={{ title }}`: the imperative
         options form replaces the header configuration wholesale, which drops the

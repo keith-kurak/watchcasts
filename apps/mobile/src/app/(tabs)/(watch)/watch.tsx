@@ -1,4 +1,5 @@
 import { LegendList, type LegendListRef } from '@legendapp/list/react-native';
+import { ObserveInteractiveMarker } from 'expo-observe';
 import { SymbolView } from 'expo-symbols';
 import { Stack, useRouter } from 'expo-router';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
@@ -194,6 +195,8 @@ export default function WatchScreen() {
 
   return (
     <ThemedView style={styles.container}>
+      {/* TTI for this route, once the watch list has loaded. See downloads.tsx. */}
+      {!isLoading && <ObserveInteractiveMarker />}
       <Stack.Screen
         options={{
           headerRight: () => (
