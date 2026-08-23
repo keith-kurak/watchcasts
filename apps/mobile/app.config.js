@@ -62,8 +62,14 @@ module.exports = ({ config }) => ({
         // white silhouette that only worked against the hardcoded blue.
         //
         // Light background matches `android.adaptiveIcon.backgroundColor` exactly — the
-        // artwork was drawn against that cream. Dark matches the app's own dark
-        // background, so the splash hands over to the first screen without a flash.
+        // artwork was drawn against that cream.
+        //
+        // Dark is deliberately not black. The icon uses only two colours, #F4794A for the
+        // body and #1A1A1A for the headphones and mic, and that near-black scores 1.21:1
+        // against pure black — the details vanish and the headphones read as a bite out of
+        // the duck's head. Lightening the background trades orange contrast for detail
+        // contrast, so this sits where both hold up: 1.63:1 on the details, 3.90:1 on the
+        // body. Going lighter still helps the details but starts reading as mid-grey.
         backgroundColor: splashColors.light,
         image: "./assets/images/android-icon-foreground.png",
         // The foreground carries the adaptive-icon safe-zone padding, so the duck fills
