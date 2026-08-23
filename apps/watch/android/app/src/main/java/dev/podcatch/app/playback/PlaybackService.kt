@@ -146,25 +146,26 @@ class PlaybackService : MediaSessionService() {
      * media controls app ignores them. It only draws extra buttons from the session's
      * *custom actions*, which a player-command button does not produce.
      *
-     * Order matters, and slots do not. The Wear app takes custom actions in list order:
-     * the first replaces its "Next" button, and every later one is buried in the
-     * "More Actions" overflow. It pays no attention to [CommandButton.setSlots], so
-     * forward goes first — a backward jump sitting where "Next" used to be reads wrong.
-     * The slot hints stay for other surfaces that do honour them, such as the phone.
+     * Order matters, and slots do not. The Wear app ignores [CommandButton.setSlots] and
+     * simply fills its two side positions with custom actions in list order — back then
+     * forward, so they read the same way round as the in-app player. Anything that does
+     * not fit is buried in the "More Actions" overflow, which is why both side positions
+     * have to be free; see `onConnect`. The slot hints stay for surfaces that do honour
+     * them, such as the phone.
      *
      * The handlers call `seekBack()`/`seekForward()`, so the distance comes from the
      * increments set on the player and stays defined in one place.
      */
     private fun seekButtons(): List<CommandButton> = listOf(
-        CommandButton.Builder(CommandButton.ICON_SKIP_FORWARD_30)
-            .setSessionCommand(SessionCommand(ACTION_SEEK_FORWARD, Bundle.EMPTY))
-            .setSlots(CommandButton.SLOT_FORWARD)
-            .setDisplayName(getString(R.string.seek_forward))
-            .build(),
         CommandButton.Builder(CommandButton.ICON_SKIP_BACK_10)
             .setSessionCommand(SessionCommand(ACTION_SEEK_BACK, Bundle.EMPTY))
             .setSlots(CommandButton.SLOT_BACK)
             .setDisplayName(getString(R.string.seek_back))
+            .build(),
+        CommandButton.Builder(CommandButton.ICON_SKIP_FORWARD_30)
+            .setSessionCommand(SessionCommand(ACTION_SEEK_FORWARD, Bundle.EMPTY))
+            .setSlots(CommandButton.SLOT_FORWARD)
+            .setDisplayName(getString(R.string.seek_forward))
             .build(),
     )
 
@@ -178,8 +179,20 @@ class PlaybackService : MediaSessionService() {
                 .add(SessionCommand(ACTION_SEEK_BACK, Bundle.EMPTY))
                 .add(SessionCommand(ACTION_SEEK_FORWARD, Bundle.EMPTY))
                 .build()
+            // Stop advertising skip-to-previous. The Wear media controls reserve their
+            // left position for it, which pushed one seek button into the overflow and
+            // left it alone on a near-empty screen. Dropping it frees that position for
+            // the second custom action, so both seek buttons sit either side of
+            // play/pause. Nothing is lost: with a single media item the command only
+            // restarts the current episode, which the progress bar already allows.
+            val playerCommands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS
+                .buildUpon()
+                .remove(Player.COMMAND_SEEK_TO_PREVIOUS)
+                .remove(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+                .build()
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(commands)
+                .setAvailablePlayerCommands(playerCommands)
                 .build()
         }
 
