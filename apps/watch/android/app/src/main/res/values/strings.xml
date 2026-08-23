@@ -1,3 +1,7 @@
 <resources>
     <string name="app_name">Podcast Duck</string>
+    <!-- Media control button labels. Shown by the system media controls as
+         accessibility labels, so they name the action rather than the icon. -->
+    <string name="seek_back">Skip back 10 seconds</string>
+    <string name="seek_forward">Skip forward 30 seconds</string>
 </resources>
