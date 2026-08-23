@@ -9,6 +9,7 @@ import {
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 
 import { HTTP_HEADERS } from './http';
+import { logPhoneDownloadCompleted } from './observe';
 import {
   episodesDir,
   getCachedEpisodes,
@@ -67,7 +68,7 @@ export function DownloadProvider({ children }: { children: React.ReactNode }) {
   }, [queryClient]);
 
   const startDownload = useCallback(
-    async (audioUrl: string, _podcastId: string, episodeGuid: string) => {
+    async (audioUrl: string, podcastId: string, episodeGuid: string) => {
       if (await isBlocked()) {
         // Stay 'pending'. The queue is picked up again once Wi-Fi returns.
         invalidate();
@@ -83,6 +84,8 @@ export function DownloadProvider({ children }: { children: React.ReactNode }) {
 
       updateDownloadItem(episodeGuid, { status: 'downloading' });
       invalidate();
+
+      const startedAt = Date.now();
 
       const task = new DownloadTask(audioUrl, destFile, {
         headers: HTTP_HEADERS,
@@ -102,6 +105,11 @@ export function DownloadProvider({ children }: { children: React.ReactNode }) {
       try {
         await task.downloadAsync();
         updateDownloadItem(episodeGuid, { status: 'complete', localPath });
+        logPhoneDownloadCompleted({
+          podcastId,
+          episodeGuid,
+          durationMs: Date.now() - startedAt,
+        });
         setProgressMap((prev) => {
           const next = new Map(prev);
           next.delete(episodeGuid);

@@ -1,11 +1,12 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 
 import WearDataLayerModule, {
   type WatchEpisodeStatus,
 } from '../../modules/wear-data-layer/src';
 import { requestWatchDownloadStatus } from '@/hooks/useWearDataLayer';
+import { logWatchDownloadCompleted } from '@/lib/observe';
 import { publishWatchList } from '@/lib/queries';
 import { mergeWatchReportedSizes, removeFromWatchList } from '@/lib/storage';
 
@@ -24,6 +25,17 @@ export function WatchStatusProvider({ children }: { children: React.ReactNode })
   const [statuses, setStatuses] = useState<Map<string, WatchEpisodeStatus>>(new Map());
   const queryClient = useQueryClient();
 
+  /**
+   * Last status seen per episode, for spotting completions.
+   *
+   * The watch reports its whole set every time, so "is complete" says nothing about
+   * whether it *became* complete — only a change against what we last saw does. It
+   * starts null and is seeded by the first report without logging anything: that first
+   * batch describes work the watch may have finished days ago, possibly while this app
+   * was closed, and replaying it as fresh completions on every launch would be wrong.
+   */
+  const lastSeenRef = useRef<Map<string, WatchEpisodeStatus['status']> | null>(null);
+
   useEffect(() => {
     if (!isAndroid) return;
 
@@ -31,6 +43,23 @@ export function WatchStatusProvider({ children }: { children: React.ReactNode })
       'onWatchDownloadStatus',
       (event: { statuses: WatchEpisodeStatus[] }) => {
         setStatuses(new Map(event.statuses.map((s) => [s.guid, s])));
+
+        const previous = lastSeenRef.current;
+        if (previous) {
+          for (const status of event.statuses) {
+            // An episode absent from the previous report is new to us, and we did not
+            // watch it download, so only a known episode turning complete counts.
+            const before = previous.get(status.guid);
+            if (status.status === 'complete' && before != null && before !== 'complete') {
+              logWatchDownloadCompleted({
+                episodeGuid: status.guid,
+                sizeBytes: status.sizeBytes ?? 0,
+              });
+            }
+          }
+        }
+        lastSeenRef.current = new Map(event.statuses.map((s) => [s.guid, s.status]));
+
         // Persist the measured sizes too. The watch storage limit is checked outside
         // React, so it cannot read this context.
         mergeWatchReportedSizes(

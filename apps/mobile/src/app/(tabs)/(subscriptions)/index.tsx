@@ -1,5 +1,6 @@
 import { LegendList } from '@legendapp/list/react-native';
 import { FloatingActionButton, Host, Icon } from '@expo/ui/jetpack-compose';
+import { ObserveInteractiveMarker } from 'expo-observe';
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
@@ -83,6 +84,14 @@ export default function SubscriptionsScreen() {
 
   return (
     <ThemedView style={styles.container}>
+      {/*
+        Marks Time to Interactive for app startup. It lives here, in the landing screen,
+        rather than in the root layout: the expo-observe router integration attributes the
+        metric from the current route, and a layout above the navigator has none — the
+        call is dropped there. Rendered unconditionally because subscriptions come out of
+        storage synchronously, so this screen is usable as soon as it renders.
+      */}
+      <ObserveInteractiveMarker />
       <Stack.Toolbar placement="right">
         <Stack.Toolbar.Menu
           icon={require('@/assets/icons/more_vert.xml')}
