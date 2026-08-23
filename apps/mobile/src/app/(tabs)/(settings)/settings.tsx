@@ -1,5 +1,6 @@
 import * as DocumentPicker from 'expo-document-picker';
 import { File, Paths } from 'expo-file-system';
+import { ObserveInteractiveMarker } from 'expo-observe';
 import { useFocusEffect } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { SymbolView } from 'expo-symbols';
@@ -202,6 +203,11 @@ export default function SettingsScreen() {
 
   return (
     <ThemedView style={styles.container}>
+      {/*
+        TTI for this route. Unconditional: every row here reads from storage
+        synchronously, so the screen is usable on its first render.
+      */}
+      <ObserveInteractiveMarker />
       <ScrollView contentContainerStyle={styles.content}>
         <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionTitle}>
           DOWNLOADS

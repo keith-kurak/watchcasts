@@ -41,9 +41,10 @@ function RootLayout() {
       .catch(() => logWatchConnectionChecked(0));
   }, []);
 
-  // Time to Interactive is marked by the landing screen, not here: the router
-  // integration reads the current route to attribute the metric, and a layout above the
-  // navigator has no route. See the marker in (tabs)/(subscriptions)/index.tsx.
+  // Time to Interactive is marked per screen, not here. The router integration reads the
+  // current route to attribute the metric, and a layout above the navigator has no route
+  // — calling it here is silently dropped. Every screen renders its own
+  // <ObserveInteractiveMarker /> once it is genuinely usable.
 
   return (
     <QueryClientProvider client={queryClient}>

@@ -1,4 +1,5 @@
 import { LegendList, type LegendListRef } from '@legendapp/list/react-native';
+import { ObserveInteractiveMarker } from 'expo-observe';
 import { useRouter } from 'expo-router';
 import { useRef } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
@@ -104,6 +105,12 @@ export default function DownloadsScreen() {
 
   return (
     <ThemedView style={styles.container}>
+      {/*
+        TTI for this route. Gated on the query rather than rendered on mount: the list is
+        what this screen is for, and marking while it is still loading would report a
+        screen that had nothing in it yet as interactive.
+      */}
+      {!isLoading && <ObserveInteractiveMarker />}
       <LegendList
         ref={listRef}
         data={downloads}

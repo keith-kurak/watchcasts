@@ -1,3 +1,4 @@
+import { ObserveInteractiveMarker } from 'expo-observe';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
@@ -71,6 +72,12 @@ export default function AddPodcastScreen() {
 
   return (
     <ThemedView style={styles.container}>
+      {/*
+        TTI for this route. Unconditional: the screen opens on an empty input field, so it
+        is ready as soon as it renders — looking up a feed is what the user does next, not
+        something they wait on to start.
+      */}
+      <ObserveInteractiveMarker />
       {found ? (
         <View style={styles.step}>
           {found.podcast.artworkUrl ? (
