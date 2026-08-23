@@ -20,6 +20,7 @@ import { WatchStatusProvider } from '@/lib/watch-status-context';
 // Before the first render, so startup metrics are collected under this config.
 configureObserve();
 
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {

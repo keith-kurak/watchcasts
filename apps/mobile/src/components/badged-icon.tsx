@@ -1,6 +1,7 @@
 import { SymbolView } from 'expo-symbols';
 import { StyleSheet, View } from 'react-native';
 
+import { useStatusColors } from '@/hooks/use-status-colors';
 import { useTheme } from '@/hooks/use-theme';
 
 type SymbolName = React.ComponentProps<typeof SymbolView>['name'];
@@ -14,13 +15,17 @@ type SymbolName = React.ComponentProps<typeof SymbolView>['name'];
  */
 export type DestinationState = 'idle' | 'pending' | 'downloading' | 'complete' | 'error';
 
-const STATE_COLORS: Record<DestinationState, string> = {
-  idle: '#8E8E93',
-  pending: '#FFB300',
-  downloading: '#FFB300',
-  complete: '#34C759',
-  error: '#FF3B30',
-};
+/** Maps each state onto a Material role. See `useStatusColors` for the reasoning. */
+function useStateColors(): Record<DestinationState, string> {
+  const status = useStatusColors();
+  return {
+    idle: status.idle,
+    pending: status.waiting,
+    downloading: status.waiting,
+    complete: status.success,
+    error: status.error,
+  };
+}
 
 const BADGE_SYMBOLS: Partial<Record<DestinationState, SymbolName>> = {
   pending: { ios: 'clock.fill', android: 'schedule' },
@@ -37,7 +42,7 @@ interface BadgedIconProps {
 
 export function BadgedIcon({ name, state, size = 24 }: BadgedIconProps) {
   const theme = useTheme();
-  const tintColor = STATE_COLORS[state];
+  const tintColor = useStateColors()[state];
   const badge = BADGE_SYMBOLS[state];
   const badgeSize = Math.round(size * 0.58);
 

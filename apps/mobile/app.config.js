@@ -8,6 +8,11 @@
 //   dev:  com.keithkurak.tinypodcatcher.dev
 //   prod: com.keithkurak.tinypodcatcher
 // ─────────────────────────────────────────────────────────────────────────────
+// Shared with the JS splash overlay in src/components/animated-icon.tsx, which covers
+// the screen for a moment after the native splash hands over. Both must use the same
+// colour or the handoff flashes.
+const splashColors = require("./splash-colors.json");
+
 const IS_DEV = (process.env.APP_VARIANT ?? "development") === "development";
 const APPLICATION_ID = IS_DEV
   ? "com.keithkurak.tinypodcatcher.dev"
@@ -52,10 +57,28 @@ module.exports = ({ config }) => ({
     [
       "expo-splash-screen",
       {
-        backgroundColor: "#208AEF",
-        android: {
-          image: "./assets/images/splash-icon.png",
-          imageWidth: 76,
+        // The launcher icon's own foreground, so the splash reads as that icon
+        // expanding rather than a second, unrelated mark. The old splash-icon.png was a
+        // white silhouette that only worked against the hardcoded blue.
+        //
+        // Light background matches `android.adaptiveIcon.backgroundColor` exactly — the
+        // artwork was drawn against that cream.
+        //
+        // Dark is deliberately not black. The icon uses only two colours, #F4794A for the
+        // body and #1A1A1A for the headphones and mic, and that near-black scores 1.21:1
+        // against pure black — the details vanish and the headphones read as a bite out of
+        // the duck's head. Lightening the background trades orange contrast for detail
+        // contrast, so this sits where both hold up: 1.63:1 on the details, 3.90:1 on the
+        // body. Going lighter still helps the details but starts reading as mid-grey.
+        backgroundColor: splashColors.light,
+        image: "./assets/images/android-icon-foreground.png",
+        // The foreground carries the adaptive-icon safe-zone padding, so the duck fills
+        // only the middle ~44% of the canvas. This is the whole canvas width; the glyph
+        // lands smaller than this number suggests.
+        imageWidth: 180,
+        dark: {
+          backgroundColor: splashColors.dark,
+          image: "./assets/images/android-icon-foreground.png",
         },
       },
     ],
@@ -76,6 +99,10 @@ module.exports = ({ config }) => ({
         },
       },
     ],
+    // Material You for the views AppCompat draws (text cursor, selection handles,
+    // native ripples). minSdkVersion 31 above means the dynamic palette is always
+    // available, so this never falls back to the Material 3 baseline.
+    "./plugins/with-material3-dynamic-colors",
   ],
   experiments: {
     typedRoutes: true,

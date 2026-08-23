@@ -11,6 +11,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { NowPlayingBarHeight, Spacing } from '@/constants/theme';
 import { useScrollToActiveDownload } from '@/hooks/use-scroll-to-active-download';
+import { useStatusColors } from '@/hooks/use-status-colors';
 import { useTheme } from '@/hooks/use-theme';
 import { formatBytes, formatDate, formatDuration } from '@/lib/format';
 import { useWatchListQuery, useWatchListMutations, type EnrichedDownloadItem } from '@/lib/queries';
@@ -38,7 +39,7 @@ const WatchRow = memo(function WatchRow({
   onLongPress: () => void;
 }) {
   const router = useRouter();
-  const theme = useTheme();
+  const statusColors = useStatusColors();
   const status = watchStatus?.status ?? 'pending';
   const progress = watchStatus?.progress ?? 0;
   // What the watch measured beats what the feed claimed. Falls back to the feed size
@@ -81,12 +82,12 @@ const WatchRow = memo(function WatchRow({
             </ThemedText>
           )}
           {status === 'waiting-wifi' && (
-            <ThemedText type="small" style={styles.waitingText}>
+            <ThemedText type="small" style={{ color: statusColors.waiting }}>
               Waiting for Wi-Fi
             </ThemedText>
           )}
           {status === 'error' && (
-            <ThemedText type="small" style={{ color: '#FF3B30' }}>
+            <ThemedText type="small" style={{ color: statusColors.error }}>
               Error
             </ThemedText>
           )}
@@ -108,11 +109,11 @@ const WatchRow = memo(function WatchRow({
           )}
         </View>
         {isDownloading && (
-          <View style={[styles.progressTrack, { backgroundColor: theme.backgroundElement }]}>
+          <View style={[styles.progressTrack, { backgroundColor: statusColors.progressTrack }]}>
             <View
               style={[
                 styles.progressFill,
-                { width: `${progress}%` },
+                { width: `${progress}%`, backgroundColor: statusColors.progressFill },
               ]}
             />
           </View>
@@ -125,6 +126,7 @@ const WatchRow = memo(function WatchRow({
 export default function WatchScreen() {
   const router = useRouter();
   const theme = useTheme();
+  const statusColors = useStatusColors();
   const watchStatuses = useWatchStatuses();
   const { data: watchList = [], isLoading, refetch, isRefetching } = useWatchListQuery();
   const { triggerSync } = useWatchListMutations();
@@ -218,10 +220,11 @@ export default function WatchScreen() {
         <View
           style={[
             styles.banner,
-            { backgroundColor: connected ? '#34C75920' : theme.backgroundElement },
+            // 20 = ~12% alpha, so the banner reads as a tint rather than a solid block.
+            { backgroundColor: connected ? `${statusColors.success}20` : theme.backgroundElement },
           ]}
         >
-          <ThemedText type="small" style={connected ? styles.connectedText : undefined}>
+          <ThemedText type="small" style={connected ? { color: statusColors.success } : undefined}>
             {connected ? 'Watch connected' : 'No watch connected'}
           </ThemedText>
         </View>
@@ -271,9 +274,6 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.two,
     alignItems: 'center',
   },
-  connectedText: {
-    color: '#34C759',
-  },
   list: {
     padding: Spacing.three,
     paddingBottom: Spacing.three + NowPlayingBarHeight,
@@ -314,12 +314,8 @@ const styles = StyleSheet.create({
     borderRadius: 1.5,
     overflow: 'hidden',
   },
-  waitingText: {
-    color: '#FFB300',
-  },
   progressFill: {
     height: '100%',
-    backgroundColor: '#007AFF',
     borderRadius: 1.5,
   },
   emptyText: {

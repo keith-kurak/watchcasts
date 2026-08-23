@@ -1,9 +1,11 @@
 import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
-import { StyleSheet, Switch, TextInput, View } from 'react-native';
+import { StyleSheet, TextInput, View } from 'react-native';
 
+import { MaterialSwitch } from '@/components/material-switch';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
+import { useStatusColors } from '@/hooks/use-status-colors';
 import { useTheme } from '@/hooks/use-theme';
 import { BytesPerGb, formatBytes } from '@/lib/format';
 
@@ -40,6 +42,7 @@ export function StorageLimitRow({
   onLimitBytesChange,
 }: StorageLimitRowProps) {
   const theme = useTheme();
+  const statusColors = useStatusColors();
   const [draft, setDraft] = useState<string | null>(null);
   const gb = limitBytes / BytesPerGb;
   // Round to two decimals, then drop trailing zeros: 10 stays '10', 1.5 stays
@@ -71,7 +74,7 @@ export function StorageLimitRow({
             {description}
           </ThemedText>
         </View>
-        <Switch value={enabled} onValueChange={onEnabledChange} />
+        <MaterialSwitch value={enabled} onValueChange={onEnabledChange} />
       </View>
 
       {enabled && (
@@ -94,7 +97,7 @@ export function StorageLimitRow({
           <ThemedText
             type="small"
             themeColor={isOverLimit ? undefined : 'textSecondary'}
-            style={[styles.usage, isOverLimit && styles.usageOverLimit]}>
+            style={[styles.usage, isOverLimit && { color: statusColors.waiting }]}>
             {formatBytes(usedBytes) || '0 B'} used
           </ThemedText>
         </View>
@@ -147,8 +150,5 @@ const styles = StyleSheet.create({
   usage: {
     flex: 1,
     textAlign: 'right',
-  },
-  usageOverLimit: {
-    color: '#FFB300',
   },
 });

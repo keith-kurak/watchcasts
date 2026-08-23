@@ -9,7 +9,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { NowPlayingBarHeight, Spacing } from '@/constants/theme';
 import { useScrollToActiveDownload } from '@/hooks/use-scroll-to-active-download';
-import { useTheme } from '@/hooks/use-theme';
+import { useStatusColors } from '@/hooks/use-status-colors';
 import { useDownloadContext } from '@/lib/download-context';
 import { formatBytes, formatDate, formatDuration } from '@/lib/format';
 import { useDownloadsQuery, type EnrichedDownloadItem } from '@/lib/queries';
@@ -18,7 +18,7 @@ const ESTIMATED_ROW_HEIGHT = 76;
 
 function DownloadRow({ item }: { item: EnrichedDownloadItem }) {
   const router = useRouter();
-  const theme = useTheme();
+  const status = useStatusColors();
   const { getProgress, isWaitingForWifi } = useDownloadContext();
   const progress = getProgress(item.episodeGuid);
   const isDownloading = item.status === 'downloading' || progress != null;
@@ -50,12 +50,12 @@ function DownloadRow({ item }: { item: EnrichedDownloadItem }) {
             </ThemedText>
           )}
           {waitingForWifi && (
-            <ThemedText type="small" style={styles.waitingText}>
+            <ThemedText type="small" style={{ color: status.waiting }}>
               Waiting for Wi-Fi
             </ThemedText>
           )}
           {item.status === 'error' && (
-            <ThemedText type="small" style={{ color: '#FF3B30' }}>
+            <ThemedText type="small" style={{ color: status.error }}>
               Error
             </ThemedText>
           )}
@@ -77,11 +77,11 @@ function DownloadRow({ item }: { item: EnrichedDownloadItem }) {
           )}
         </View>
         {isDownloading && (
-          <View style={[styles.progressTrack, { backgroundColor: theme.backgroundElement }]}>
+          <View style={[styles.progressTrack, { backgroundColor: status.progressTrack }]}>
             <View
               style={[
                 styles.progressFill,
-                { width: `${Math.round((progress ?? 0) * 100)}%` },
+                { width: `${Math.round((progress ?? 0) * 100)}%`, backgroundColor: status.progressFill },
               ]}
             />
           </View>
@@ -179,11 +179,7 @@ const styles = StyleSheet.create({
   },
   progressFill: {
     height: '100%',
-    backgroundColor: '#007AFF',
     borderRadius: 1.5,
-  },
-  waitingText: {
-    color: '#FFB300',
   },
   emptyText: {
     textAlign: 'center',
