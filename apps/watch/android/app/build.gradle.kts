@@ -4,6 +4,25 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ⚠️  VERSIONS COME FROM THE PHONE APP — see scripts/sync-watch-version.mjs
+//
+// The watch and the phone ship as two artifacts under ONE Play listing, because
+// they share an applicationId. Play rejects a release whose artifacts share a
+// versionCode, so the two can never both be numbered from 1.
+//
+// The phone's versionCode is assigned remotely by EAS and auto-increments. The
+// watch takes that number plus 10000, which keeps it unique, ordered, and
+// obviously paired: phone 13 is watch 10013. The versionName is copied across
+// verbatim so both artifacts report the same x.y.z to users.
+//
+// The values arrive as gradle properties, passed by .eas/build/watch-production.yml
+// from the WATCH_VERSION_CODE / WATCH_VERSION_NAME environment variables. The
+// fallbacks below only apply to local and preview builds, which never reach Play.
+// ─────────────────────────────────────────────────────────────────────────────
+val watchVersionCode = (project.findProperty("watchVersionCode") as String?)?.toInt() ?: 1
+val watchVersionName = (project.findProperty("watchVersionName") as String?) ?: "1.0.0"
+
 android {
     namespace = "dev.podcatch.app"
     compileSdk = 35
@@ -12,8 +31,8 @@ android {
         applicationId = "com.keithkurak.tinypodcatcher"  // MUST match the phone app
         minSdk = 33                          // Wear OS 4.0 (Android 13)
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = watchVersionCode
+        versionName = watchVersionName
     }
 
     signingConfigs {
