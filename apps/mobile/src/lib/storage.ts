@@ -17,6 +17,7 @@ const WATCH_LIMIT_BYTES_KEY = 'watchStorageLimitBytes';
 const WATCH_REPORTED_SIZES_KEY = 'watchReportedSizes';
 const SYNC_PLAYBACK_KEY = 'syncPlaybackProgress';
 const PLAYBACK_EPOCH_KEY = 'playbackProgressEpoch';
+const ONBOARDING_SEEN_KEY = 'onboardingSeen';
 
 function episodesKey(podcastId: string) {
   return `episodes:${podcastId}`;
@@ -142,6 +143,21 @@ export function getWifiOnlyDownloads(): boolean {
 
 export function setWifiOnlyDownloads(enabled: boolean): void {
   Storage.setItemSync(WIFI_ONLY_KEY, String(enabled));
+}
+
+/**
+ * Whether the one-time onboarding has been shown.
+ *
+ * Defaults to false so an existing install that predates this flag still sees it once.
+ * Written when the flow is completed *or* skipped — skipping is a decision, and showing
+ * it again on the next launch would ignore that.
+ */
+export function getOnboardingSeen(): boolean {
+  return Storage.getItemSync(ONBOARDING_SEEN_KEY) === 'true';
+}
+
+export function setOnboardingSeen(): void {
+  Storage.setItemSync(ONBOARDING_SEEN_KEY, 'true');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
