@@ -2,7 +2,6 @@ package dev.podcatch.app.presentation
 
 import android.app.Application
 import android.content.ComponentName
-import android.os.Vibrator
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
@@ -14,9 +13,12 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.material.Button
@@ -26,12 +28,12 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.concurrent.futures.await
+import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.Text
 import com.google.android.horologist.annotations.ExperimentalHorologistApi
-import com.google.android.horologist.audio.SystemAudioRepository
 import com.google.android.horologist.audio.ui.VolumeViewModel
 import com.google.android.horologist.audio.ui.components.actions.SetVolumeButton
 import com.google.android.horologist.media.data.repository.PlayerRepositoryImpl
@@ -48,11 +50,17 @@ import dev.podcatch.app.playback.PlaybackService
 import dev.podcatch.app.playback.PlaybackState
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalHorologistApi::class)
 @Composable
-fun EpisodePlayerScreen(guid: String, onVolumeClick: () -> Unit, onSpeedClick: () -> Unit) {
+fun EpisodePlayerScreen(
+    guid: String,
+    volumeViewModel: VolumeViewModel,
+    onVolumeClick: () -> Unit,
+    onSpeedClick: () -> Unit,
+) {
     val episodes by SyncedWatchEpisodes.episodes.collectAsState()
     val episode = episodes.find { it.guid == guid }
     if (episode == null || episode.localPath == null) return
@@ -69,23 +77,31 @@ fun EpisodePlayerScreen(guid: String, onVolumeClick: () -> Unit, onSpeedClick: (
         },
     )
 
-    val volumeViewModel: VolumeViewModel = viewModel(
-        factory = object : ViewModelProvider.Factory {
-            @Suppress("UNCHECKED_CAST")
-            override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                val audioRepository = SystemAudioRepository.fromContext(application)
-                val vibrator = application.getSystemService(Vibrator::class.java)
-                return VolumeViewModel(
-                    audioRepository,
-                    audioRepository,
-                    onCleared = { audioRepository.close() },
-                    vibrator,
-                ) as T
-            }
-        },
-    )
-
     val volumeUiState by volumeViewModel.volumeUiState.collectAsState()
+
+    /*
+      PlayerScreen builds its own FocusRequester when it is not given one, and asks for focus
+      through `requestFocusOnHierarchyActive` — which fires when this screen becomes the
+      active part of the hierarchy, and not again after that. On the very first launch of a
+      new install, the POST_NOTIFICATIONS dialog owns the window at that moment, so the
+      request lands on an unfocused window and is lost: the crown does nothing until
+      something re-composes the screen, such as a trip to the volume or speed screen. That is
+      also why it never recurs — the permission is only ever asked for once per install.
+
+      Owning the requester here lets it be re-asked for whenever the window comes back, which
+      covers the permission dialog and every other window that can steal focus.
+    */
+    val focusRequester = remember { FocusRequester() }
+    val windowInfo = LocalWindowInfo.current
+    LaunchedEffect(windowInfo) {
+        snapshotFlow { windowInfo.isWindowFocused }
+            .filter { it }
+            .collect {
+                // Throws if no focusable node is attached yet, which is not worth crashing
+                // over: the crown is an accelerator here, never the only way through.
+                runCatching { focusRequester.requestFocus() }
+            }
+    }
 
     // Poll elapsed time from the MediaController
     var elapsedMs by remember { mutableLongStateOf(0L) }
@@ -103,6 +119,7 @@ fun EpisodePlayerScreen(guid: String, onVolumeClick: () -> Unit, onSpeedClick: (
     PlayerScreen(
         playerViewModel = playerViewModel,
         volumeViewModel = volumeViewModel,
+        focusRequester = focusRequester,
         mediaDisplay = { playerUiState ->
             MediaInfoWithElapsed(playerUiState, elapsedMs, durationMs)
         },
@@ -205,6 +222,14 @@ class EpisodePlayerViewModel(
                 position = startPosition.milliseconds,
             )
 
+            // setMediaList only calls Player.setMediaItems — it does not prepare, and
+            // Horologist only prepares when you press play. Until then the session's player
+            // sits in STATE_IDLE holding an item, which the system media controls render as a
+            // permanent spinner with dead transport buttons. Preparing here costs nothing
+            // (the file is local, playWhenReady is still false) and means the session is
+            // honest about its state from the moment the episode is loaded.
+            if (ctrl.playbackState == Player.STATE_IDLE) ctrl.prepare()
+
             PlaybackState.setCurrentEpisode(episode.guid)
 
             ctrl.setPlaybackSpeed(currentSpeed)
@@ -250,6 +275,17 @@ class EpisodePlayerViewModel(
                 )
             }
         }
+        /*
+          A MediaController binds PlaybackService, and Horologist's PlayerViewModel does not
+          release either the controller or the repository — it has no onCleared at all. Left
+          alone, every visit to the player screen leaks a bound controller: the service can
+          then never actually stop, because `stopSelf` does nothing while clients are bound,
+          so a session with a stale episode outlives clearing the app from recents. Release
+          the controller and close the repository that wraps it, in that order.
+        */
+        repository.close()
+        controller?.release()
+        controller = null
         super.onCleared()
     }
 

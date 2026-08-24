@@ -1,10 +1,12 @@
 package dev.podcatch.app.presentation
 
 import android.Manifest
+import android.app.Application
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Vibrator
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -87,8 +89,12 @@ import androidx.wear.compose.material.VignettePosition
 import androidx.wear.compose.navigation.SwipeDismissableNavHost
 import androidx.wear.compose.navigation.composable
 import androidx.wear.compose.navigation.rememberSwipeDismissableNavController
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import com.google.android.horologist.annotations.ExperimentalHorologistApi
+import com.google.android.horologist.audio.SystemAudioRepository
 import com.google.android.horologist.audio.ui.VolumeScreen
+import com.google.android.horologist.audio.ui.VolumeViewModel
 import com.google.android.horologist.compose.ambient.AmbientAware
 import com.google.android.horologist.compose.ambient.AmbientState
 import androidx.work.ExistingWorkPolicy
@@ -379,6 +385,37 @@ private fun retryEpisodeDownload(context: android.content.Context, episode: Watc
 fun PodcatchApp() {
     PodcatchTheme {
         val navController = rememberSwipeDismissableNavController()
+        /*
+          One instance for the whole app, deliberately built here rather than inside the
+          player screen.
+
+          Horologist's volume state is not read from AudioManager — SystemAudioRepository
+          derives it from MediaRouter's selected route, and only refreshes it when a route
+          callback fires. Built lazily on the player screen, its very first read happens
+          against a MediaRouter that has not resolved a route yet, which reports no volume
+          and no volume control: hence a mute icon over loud audio, and a crown that turns
+          nothing. Creating it with the app registers that callback at startup, so the route
+          is settled long before the player screen is opened.
+
+          It also means the player screen's volume button and the volume screen read the same
+          state. They used to hold one repository each, and could disagree.
+        */
+        val application = LocalContext.current.applicationContext as Application
+        val volumeViewModel: VolumeViewModel = viewModel(
+            factory = object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                    val audioRepository = SystemAudioRepository.fromContext(application)
+                    val vibrator = application.getSystemService(Vibrator::class.java)
+                    return VolumeViewModel(
+                        audioRepository,
+                        audioRepository,
+                        onCleared = { audioRepository.close() },
+                        vibrator,
+                    ) as T
+                }
+            },
+        )
         // Hoisted so the Scaffold's position indicator can read it. The Scaffold sits
         // above the NavHost and otherwise has no way to know what is scrolling.
         val episodeListState = rememberScalingLazyListState()
@@ -422,12 +459,13 @@ fun PodcatchApp() {
                             ?: return@composable
                         EpisodePlayerScreen(
                             guid = Uri.decode(guid),
+                            volumeViewModel = volumeViewModel,
                             onVolumeClick = { navController.navigate("volume") },
                             onSpeedClick = { navController.navigate("speed") },
                         )
                     }
                     composable("volume") {
-                        VolumeScreen()
+                        VolumeScreen(volumeViewModel = volumeViewModel)
                     }
                     composable("speed") {
                         val playerEntry = remember(navController) {
