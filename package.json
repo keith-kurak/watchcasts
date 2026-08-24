@@ -19,6 +19,7 @@
     "build:production:mobile": "bun run --cwd apps/mobile build-aab -- --no-wait && bun run sync:watch-version",
     "build:production:watch": "bun run --cwd apps/watch build-aab -- --no-wait",
     "sync:watch-version": "bun scripts/sync-watch-version.mjs",
+    "bump:phone-version": "bun scripts/bump-phone-version.mjs",
     "typecheck": "bun --filter '*' typecheck"
   }
 }
