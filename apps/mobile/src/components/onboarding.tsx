@@ -62,10 +62,10 @@ export function AppOnboarding({ onDone }: { onDone: () => void }) {
         // rectangle of `primary` looks like a rendering failure rather than a design.
         background={() => <Backdrop color={m.primary} showLogo={step < 0} />}
         introPanel={{
-          title: 'Podcasts on your wrist',
+          title: 'Simple podcasts for watch people',
           subtitle:
-            'Subscribe on your phone, send episodes to your watch, then leave the phone at home.',
-          button: 'Show me how',
+            `Subscribe to shows, download episodes to your phone or WearOS device, and play. That's it.`,
+          button: 'Next',
           // The logo lives in the backdrop above, not here. A function still counts as an
           // image to the library, which is what stops it from promoting step 1's screenshot
           // onto the intro; returning null keeps the panel itself text-only.
@@ -76,7 +76,7 @@ export function AppOnboarding({ onDone }: { onDone: () => void }) {
             label: 'Step 1',
             title: 'Subscribe to a few shows',
             description:
-              'Search for a podcast and subscribe. The Subscriptions tab collects your shows, and new episodes appear there as they are published.',
+              `Add podcasts with RSS or Apple Podcasts links. Or import a bunch of once with an OPML file.`,
             buttonLabel: 'Next',
             image: require('@/assets/images/onboarding/step-subscriptions.png'),
             position: 'top',
@@ -85,7 +85,7 @@ export function AppOnboarding({ onDone }: { onDone: () => void }) {
             label: 'Step 2',
             title: 'Send an episode to your watch',
             description:
-              'Tap the watch icon next to any episode. It downloads to the watch over your phone, and the Watch tab tracks the progress.',
+              'Tap the watch icon to download to your watch, tap the phone icon to download to your phone.',
             buttonLabel: 'Next',
             // Two screenshots in one slot, so this step is drawn by StepTwoCrossfade below
             // rather than from a single composited asset. Every step has to name an image,
@@ -95,9 +95,9 @@ export function AppOnboarding({ onDone }: { onDone: () => void }) {
           },
           {
             label: 'Step 3',
-            title: 'Leave your phone behind',
+            title: 'Listen to some shows',
             description:
-              'Downloaded episodes play straight from the watch — no phone, no signal needed. Your place is kept in sync between the two.',
+              'Play episodes 100% offline on your watch or phone. Increase the speed, skip ahead. Long press on episodes on the watch to queue up a playlist.',
             buttonLabel: 'Start listening',
             image: require('@/assets/images/onboarding/step-watch.png'),
             position: 'top',
