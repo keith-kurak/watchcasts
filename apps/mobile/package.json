@@ -3,6 +3,7 @@
   "main": "expo-router/entry",
   "version": "1.0.0",
   "dependencies": {
+    "@blazejkustra/react-native-onboarding": "^1.0.1",
     "@expo/ui": "~57.0.7",
     "@legendapp/list": "^3.3.3",
     "@podcatch/shared": "workspace:*",

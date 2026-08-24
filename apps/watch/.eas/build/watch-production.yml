@@ -8,7 +8,24 @@ build:
         command: |
           GRADLE_FILE=/home/expo/workingdir/build/apps/watch/android/app/build.gradle.kts
           sed -i 's/apply from: "\(.*\)"/apply(from = "\1")/' "$GRADLE_FILE"
+    # The version is the phone app's, not the watch's own — see the header comment in
+    # apps/watch/android/app/build.gradle.kts. Checked before the build rather than
+    # allowing the gradle fallbacks to apply, because a watch AAB numbered 1 is
+    # rejected by Play only after upload, long after this job has gone green.
+    - run:
+        name: Require the version synced from the phone release
+        command: |
+          if [ -z "$WATCH_VERSION_CODE" ] || [ -z "$WATCH_VERSION_NAME" ]; then
+            echo "WATCH_VERSION_CODE and WATCH_VERSION_NAME must be set in the" >&2
+            echo "production environment. They are written by the phone app's" >&2
+            echo "production build: bun run build:production:mobile" >&2
+            exit 1
+          fi
+          echo "Building watch $WATCH_VERSION_NAME ($WATCH_VERSION_CODE)"
     - run:
         name: Build Watch AAB
-        command: cd /home/expo/workingdir/build/apps/watch/android && ./gradlew :app:bundleRelease
+        command: |
+          cd /home/expo/workingdir/build/apps/watch/android && ./gradlew :app:bundleRelease \
+            -PwatchVersionCode="$WATCH_VERSION_CODE" \
+            -PwatchVersionName="$WATCH_VERSION_NAME"
     - eas/find_and_upload_build_artifacts
