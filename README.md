@@ -79,8 +79,3 @@ Flow:
 4. (Optional) If the watch has no direct connectivity, fall back to pushing audio
    from the phone via `ChannelClient`.
 
-## Next steps (not yet scaffolded)
-
-- Phone: build the subscription UI + RSS parsing, write subscriptions via `DataClient`.
-- Watch: Room store, `WorkManager` download worker, episode list + player UI.
-- Both: advertise capabilities (`CapabilityClient`) so each side can detect the other.
