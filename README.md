@@ -1,4 +1,4 @@
-# Podcatch
+# Tiny Podcatcher / "Podcast Duck"
 
 A hybrid podcast app: an Expo (React Native, CNG) phone app and a native Wear OS
 app. The phone app manages subscriptions; the watch syncs them over the Wearable
