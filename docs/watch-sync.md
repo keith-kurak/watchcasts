@@ -329,18 +329,23 @@ this change it did download, just unusably slowly.
 2. If the list is empty: returns `success()` when `hasStoredList` is true (genuinely nothing
    queued), or `failure()` when it is false (no persisted state — reporting success here
    would silently swallow every queued download)
-3. Consults the crash-loop breaker via `DownloadRunGuard.beginRun()` (see below). A tripped
+3. If nothing is eligible — no episode with `localPath == null && !error && audioUrl` and
+   no missing artwork — returns `success()` **before touching the network**. The enqueue
+   sites filter too, but this is the check that holds: WorkManager replays queued work
+   after a reboot, and the listener-service filter counts errored episodes the loop below
+   skips
+4. Consults the crash-loop breaker via `DownloadRunGuard.beginRun()` (see below). A tripped
    breaker means: report `halted`, return `failure()`, run nothing
-4. Acquires a high-bandwidth network (see above), or returns early when only the Bluetooth
+5. Acquires a high-bandwidth network (see above), or returns early when only the Bluetooth
    proxy is available
-5. Calls `downloadArtwork()` — caches every missing artwork image; failures are logged and skipped
-6. Loops: takes the **first** episode where `localPath == null && !error && audioUrl.isNotBlank()`
-7. Checks the free-space floor (see below) before and during each episode
-8. Resumes from `<guid>.mp3.tmp` if one exists (see below), else starts fresh
-9. Streams the body to `<guid>.mp3.tmp` in 8 KB chunks
-10. Renames `.tmp` → `.mp3` on completion, then calls `markDownloaded`
-11. Breaks out of the loop when no eligible episode remains, and returns `Result.success()`
-12. Releases the network lease and calls `DownloadRunGuard.endRun()` in a `finally`, whatever
+6. Calls `downloadArtwork()` — caches every missing artwork image; failures are logged and skipped
+7. Loops: takes the **first** episode where `localPath == null && !error && audioUrl.isNotBlank()`
+8. Checks the free-space floor (see below) before and during each episode
+9. Resumes from `<guid>.mp3.tmp` if one exists (see below), else starts fresh
+10. Streams the body to `<guid>.mp3.tmp` in 8 KB chunks
+11. Renames `.tmp` → `.mp3` on completion, then calls `markDownloaded`
+12. Breaks out of the loop when no eligible episode remains, and returns `Result.success()`
+13. Releases the network lease and calls `DownloadRunGuard.endRun()` in a `finally`, whatever
     the outcome
 
 Ordering is the phone's watch-list order. There is no priority and no parallelism — strictly one file at a time.
@@ -908,6 +913,11 @@ into a self-sustaining loop.
   reboots that tripped it); `no-space` sits between `downloading` and `waiting-wifi`.
 - Phone: `WatchEpisodeStatus.status` union gains the two values; the watch tab renders
   "Paused after watch restarts — sync to retry" and "Watch storage full" in the error color.
+- The worker now verifies eligibility itself before touching the network: with no
+  undownloaded, un-errored audio and no missing artwork it returns `success()` without
+  acquiring Wi-Fi or arming the breaker. Previously a non-empty but fully-downloaded list —
+  work replayed after a reboot, or a list of only errored episodes (the listener-service
+  filter does not exclude `error`) — brought Wi-Fi up for nothing.
 
 Verified: not yet — needs both apps rebuilt. The breaker's crash path also cannot be
 exercised on an emulator without inducing a mid-run reboot (e.g. `adb reboot` during a

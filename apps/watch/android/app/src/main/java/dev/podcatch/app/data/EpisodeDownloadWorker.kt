@@ -80,6 +80,20 @@ class EpisodeDownloadWorker(
             }
         }
 
+        // Nothing eligible → done, before the radio is so much as looked at. The enqueue
+        // sites filter too, but this is the check that holds: WorkManager replays queued
+        // work after a reboot, state can change between enqueue and run, and the
+        // listener-service filter counts errored episodes the loop below will skip.
+        // Bringing Wi-Fi up costs battery and is the one operation under crash suspicion,
+        // so it is not spent on a run with no bytes to move.
+        val episodes = SyncedWatchEpisodes.episodes.value
+        val needsAudio = episodes.any { it.localPath == null && !it.error && it.audioUrl.isNotBlank() }
+        val needsArtwork = episodes.any { it.artworkPath == null && it.artworkUrl.isNotBlank() }
+        if (!needsAudio && !needsArtwork) {
+            Log.d(TAG, "Everything on the list is already downloaded; not touching the network")
+            return@withContext Result.success()
+        }
+
         // Get off the Bluetooth companion proxy before moving a single byte. Held for the
         // whole run rather than per episode, so Wi-Fi is not torn down and re-established
         // between files.
