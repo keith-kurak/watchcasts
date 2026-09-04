@@ -52,6 +52,10 @@ export const MessagePaths = {
   /**
    * Watch -> phone: JSON array of { guid, status, progress, sizeBytes }.
    *
+   * `status` is one of: pending | downloading | complete | error | waiting-wifi |
+   * halted | no-space. See WatchEpisodeStatus in
+   * apps/mobile/modules/wear-data-layer/src/index.ts for what each one means.
+   *
    * `sizeBytes` is the measured size of the downloaded file on the watch. It is 0 for an
    * episode that has not finished downloading, and 0 from watch builds predating the
    * field — both mean "unknown", so the phone falls back to the size the feed declared.

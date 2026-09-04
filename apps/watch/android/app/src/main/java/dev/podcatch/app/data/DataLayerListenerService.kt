@@ -74,6 +74,8 @@ class DataLayerListenerService : WearableListenerService() {
             DataLayerContract.PATH_REQUEST_SYNC -> {
                 Log.d(TAG, "Received force-download request from phone")
                 SyncedWatchEpisodes.load(applicationContext)
+                // Sync is a deliberate act, so it also re-arms the crash-loop breaker.
+                DownloadRunGuard.resetBreaker(applicationContext)
                 // Sync is what someone reaches for when a download is stuck, so it clears
                 // failures rather than skipping exactly the episodes that need attention.
                 val cleared = SyncedWatchEpisodes.clearAllErrors()
@@ -88,6 +90,9 @@ class DataLayerListenerService : WearableListenerService() {
                 if (guid.isBlank()) return
                 Log.d(TAG, "Phone asked to retry $guid")
                 SyncedWatchEpisodes.load(applicationContext)
+                // Retry is as deliberate as sync; without this the freshly cleared
+                // episode would hit a tripped breaker and go straight back to "halted".
+                DownloadRunGuard.resetBreaker(applicationContext)
                 SyncedWatchEpisodes.clearError(guid)
                 WatchDownloadStatusReporter.reportStatus(applicationContext)
                 enqueueDownloads(expedited = true, replaceExisting = true)

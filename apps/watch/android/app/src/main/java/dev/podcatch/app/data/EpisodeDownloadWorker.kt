@@ -85,6 +85,19 @@ class EpisodeDownloadWorker(
         // between files.
         SyncedSettings.load(applicationContext)
         val allowMetered = !SyncedSettings.wifiOnlyDownloads.value
+
+        // Crash-loop breaker. Everything past this line can plausibly take the device
+        // down — acquire() powers the Wi-Fi radio up through firmware this app cannot
+        // see into. If two consecutive runs each ended in a reboot, stop volunteering:
+        // WorkManager re-enqueues this worker after every boot, so without this check a
+        // run that panics the device sustains a boot loop by itself. failure(), not
+        // retry() — nothing may re-arm this except a person (see DownloadRunGuard).
+        if (!DownloadRunGuard.beginRun(applicationContext)) {
+            Log.w(TAG, "Downloads suspended after repeated mid-run reboots; waiting for user action")
+            WatchDownloadStatusReporter.reportStatus(applicationContext)
+            return@withContext Result.failure()
+        }
+
         val lease = HighBandwidthNetwork.acquire(applicationContext, allowMetered)
         try {
             val network = lease?.network
@@ -101,6 +114,8 @@ class EpisodeDownloadWorker(
             return@withContext download(network, dir)
         } finally {
             lease?.release()
+            // Reaching here at all proves this run did not take the device down.
+            DownloadRunGuard.endRun(applicationContext)
         }
     }
 
@@ -123,6 +138,20 @@ class EpisodeDownloadWorker(
             val episode = SyncedWatchEpisodes.episodes.value
                 .firstOrNull { it.localPath == null && !it.error && it.audioUrl.isNotBlank() }
                 ?: break // All done
+
+            // Free-space floor. A watch with a full /data partition gets unstable well
+            // before writes start failing, so stop while the system still has headroom.
+            // The queue is left intact — success(), like the no-network refusal above —
+            // and the flag tells the phone why nothing is moving. Not markError: a full
+            // disk is not the episode's fault, and freeing space should not require a
+            // per-episode retry.
+            if (dir.usableSpace < MIN_FREE_BYTES) {
+                Log.w(TAG, "Only ${dir.usableSpace} bytes free (floor $MIN_FREE_BYTES); pausing downloads")
+                DownloadRunGuard.setOutOfSpace(applicationContext, true)
+                WatchDownloadStatusReporter.reportStatus(applicationContext)
+                return Result.success()
+            }
+            DownloadRunGuard.setOutOfSpace(applicationContext, false)
 
             val outFile = File(dir, "${episode.guid}.mp3")
             val tmpFile = File(dir, "${episode.guid}.mp3.tmp")
@@ -159,6 +188,21 @@ class EpisodeDownloadWorker(
                 // can be computed at all.
                 val remaining = connection.contentLengthLong
                 val totalBytes = if (remaining > 0) startBytes + remaining else -1L
+
+                // Now the real size is known, re-check against it. The floor check above
+                // only proves the floor exists — a 300 MB episode into 600 MB free would
+                // pass it and then eat the headroom the floor is there to protect.
+                if (remaining > 0 && dir.usableSpace < remaining + MIN_FREE_BYTES) {
+                    Log.w(
+                        TAG,
+                        "Episode ${episode.guid} needs $remaining bytes; " +
+                            "only ${dir.usableSpace} free (floor $MIN_FREE_BYTES). Pausing downloads",
+                    )
+                    connection.disconnect()
+                    DownloadRunGuard.setOutOfSpace(applicationContext, true)
+                    WatchDownloadStatusReporter.reportStatus(applicationContext)
+                    return Result.success()
+                }
 
                 Log.d(TAG, "Downloading episode ${episode.guid} (total=$totalBytes)")
                 SyncedWatchEpisodes.updateProgress(
@@ -214,6 +258,15 @@ class EpisodeDownloadWorker(
             } catch (e: Exception) {
                 // The partial file is deliberately kept either way. A retry resumes from
                 // it, and a server that ignores Range makes us discard it anyway.
+                if (dir.usableSpace < MIN_FREE_BYTES) {
+                    // ENOSPC mid-write surfaces as a plain IOException. Checked by
+                    // measuring rather than by message — messages are localised and vary
+                    // by OEM. Same handling as the pre-checks: not the episode's fault.
+                    Log.w(TAG, "Write failed with disk below floor; pausing downloads", e)
+                    DownloadRunGuard.setOutOfSpace(applicationContext, true)
+                    WatchDownloadStatusReporter.reportStatus(applicationContext)
+                    return Result.success()
+                }
                 if (isNetworkGone(e)) {
                     // Not the episode's fault, so do not brand it failed. A sticky error
                     // outranks every other status the phone can show — including
@@ -422,6 +475,16 @@ class EpisodeDownloadWorker(
 
         private const val CONNECT_TIMEOUT_MS = 15_000
         private const val READ_TIMEOUT_MS = 30_000
+
+        /**
+         * Free space the download loop refuses to eat into.
+         *
+         * Wear OS gets unstable — up to and including failing to boot — when /data runs
+         * out, so the check exists to protect the *system*, not the download. 500 MB is
+         * deliberately generous next to a ~100 MB episode: the OS, Play Services, and
+         * other apps keep writing while a download runs.
+         */
+        private const val MIN_FREE_BYTES = 500L * 1024 * 1024
 
         /**
          * Progress value meaning "downloading, total size unknown". Servers using

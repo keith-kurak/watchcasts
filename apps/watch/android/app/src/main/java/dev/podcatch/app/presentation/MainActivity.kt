@@ -106,6 +106,7 @@ import com.google.android.gms.wearable.DataEventBuffer
 import com.google.android.gms.wearable.DataMapItem
 import com.google.android.gms.wearable.Wearable
 import dev.podcatch.app.data.DataLayerContract
+import dev.podcatch.app.data.DownloadRunGuard
 import dev.podcatch.app.data.EpisodeDownloadWorker
 import dev.podcatch.app.data.PhoneRequests
 import dev.podcatch.app.data.PlaybackProgressSync
@@ -140,6 +141,9 @@ class MainActivity : ComponentActivity(), DataClient.OnDataChangedListener {
         installSplashScreen()
         super.onCreate(savedInstanceState)
         requestNotificationPermissionIfNeeded()
+        // Opening the app is the deliberate act that re-arms downloads after the
+        // crash-loop breaker trips. onResume enqueues the worker, so this must come first.
+        DownloadRunGuard.resetBreaker(this)
         SyncedWatchEpisodes.load(this)
         SyncedWatchEpisodes.artworkDir?.mkdirs()
         SyncedSettings.load(this)
