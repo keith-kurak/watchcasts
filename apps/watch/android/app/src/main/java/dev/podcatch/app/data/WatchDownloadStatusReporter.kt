@@ -35,15 +35,23 @@ object WatchDownloadStatusReporter {
         //      Bluetooth proxy reports NOT_METERED, so case 1 does *not* catch this.
         val waitingForWifi = SyncedSettings.isWaitingForWifi(context) ||
             HighBandwidthNetwork.lastAcquireFailed(context)
+        // The crash-loop breaker tripped: downloads are suspended until a person opens
+        // the watch app or presses sync/retry on the phone. Outranks "downloading" —
+        // a persisted mid-download percentage survives the reboots that tripped it,
+        // and nothing is actually moving.
+        val downloadsHalted = DownloadRunGuard.isTripped(context)
+        val outOfSpace = DownloadRunGuard.isOutOfSpace(context)
 
         val array = JSONArray()
         for (ep in episodes) {
             val status = when {
                 ep.localPath != null -> "complete"
                 ep.error -> "error"
+                downloadsHalted -> "halted"
                 // Non-zero covers EpisodeDownloadWorker.INDETERMINATE (-1), which means
                 // "downloading, total size unknown".
                 ep.downloadProgress != 0 -> "downloading"
+                outOfSpace -> "no-space"
                 // Say *why* nothing is happening rather than a bare "pending".
                 waitingForWifi -> "waiting-wifi"
                 else -> "pending"

@@ -91,6 +91,16 @@ const WatchRow = memo(function WatchRow({
               Error
             </ThemedText>
           )}
+          {status === 'halted' && (
+            <ThemedText type="small" style={{ color: statusColors.error }}>
+              Paused after watch restarts — sync to retry
+            </ThemedText>
+          )}
+          {status === 'no-space' && (
+            <ThemedText type="small" style={{ color: statusColors.error }}>
+              Watch storage full
+            </ThemedText>
+          )}
           {status === 'complete' && item.episode.pubDate && (
             <ThemedText type="small" themeColor="textSecondary">
               {formatDate(item.episode.pubDate)}

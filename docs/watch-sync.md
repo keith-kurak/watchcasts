@@ -4,7 +4,7 @@ How the Podcatch phone app and the Wear OS app exchange data, and how the watch 
 
 > **Keep this current.** Any change to the Data Layer contract, the download worker, or watch-side state must be reflected here in the same commit. See [Change log](#change-log).
 >
-> **Status:** describes behavior as of 2026-08-07. The [Known issues](#known-issues) section lists defects that exist in the code today.
+> **Status:** describes behavior as of 2026-09-04. The [Known issues](#known-issues) section lists defects that exist in the code today.
 
 ---
 
@@ -329,15 +329,24 @@ this change it did download, just unusably slowly.
 2. If the list is empty: returns `success()` when `hasStoredList` is true (genuinely nothing
    queued), or `failure()` when it is false (no persisted state — reporting success here
    would silently swallow every queued download)
-3. Acquires a high-bandwidth network (see above), or returns early when only the Bluetooth
+3. If nothing is eligible — no episode with `localPath == null && !error && audioUrl` and
+   no missing artwork — returns `success()` **before touching the network**. The enqueue
+   sites filter too, but this is the check that holds: WorkManager replays queued work
+   after a reboot, and the listener-service filter counts errored episodes the loop below
+   skips
+4. Consults the crash-loop breaker via `DownloadRunGuard.beginRun()` (see below). A tripped
+   breaker means: report `halted`, return `failure()`, run nothing
+5. Acquires a high-bandwidth network (see above), or returns early when only the Bluetooth
    proxy is available
-4. Calls `downloadArtwork()` — caches every missing artwork image; failures are logged and skipped
-5. Loops: takes the **first** episode where `localPath == null && !error && audioUrl.isNotBlank()`
-6. Resumes from `<guid>.mp3.tmp` if one exists (see below), else starts fresh
-7. Streams the body to `<guid>.mp3.tmp` in 8 KB chunks
-8. Renames `.tmp` → `.mp3` on completion, then calls `markDownloaded`
-9. Breaks out of the loop when no eligible episode remains, and returns `Result.success()`
-10. Releases the network lease in a `finally`, whatever the outcome
+6. Calls `downloadArtwork()` — caches every missing artwork image; failures are logged and skipped
+7. Loops: takes the **first** episode where `localPath == null && !error && audioUrl.isNotBlank()`
+8. Checks the free-space floor (see below) before and during each episode
+9. Resumes from `<guid>.mp3.tmp` if one exists (see below), else starts fresh
+10. Streams the body to `<guid>.mp3.tmp` in 8 KB chunks
+11. Renames `.tmp` → `.mp3` on completion, then calls `markDownloaded`
+12. Breaks out of the loop when no eligible episode remains, and returns `Result.success()`
+13. Releases the network lease and calls `DownloadRunGuard.endRun()` in a `finally`, whatever
+    the outcome
 
 Ordering is the phone's watch-list order. There is no priority and no parallelism — strictly one file at a time.
 
@@ -444,7 +453,68 @@ from recurring:
   backoff can no longer swallow a deliberate request. Replacing a running worker is safe;
   partial downloads resume from their `.tmp`.
 
-### Retrying### Retrying
+### Crash-loop breaker
+
+`DownloadRunGuard` (`SharedPreferences("download-guard")`) stops the worker from sustaining
+a device boot loop.
+
+The failure shape it exists for: everything past `beginRun()` can plausibly take the whole
+device down, because `HighBandwidthNetwork.acquire()` powers the Wi-Fi radio up through
+kernel and firmware code the app cannot see into. A firmware panic there reboots the watch —
+and WorkManager's `RescheduleReceiver` restarts pending work on `BOOT_COMPLETED`, so the run
+re-arms itself after every boot. Reported from the field as a watch stuck rebooting after
+first install, with no window to uninstall.
+
+Mechanics:
+
+- `beginRun()` stamps the current boot id (`/proc/sys/kernel/random/boot_id`) before the
+  worker touches the network; `endRun()` clears the stamp in the worker's `finally`.
+- A stamp left over from an **earlier boot** means the device went down mid-run. `beginRun()`
+  folds it into a consecutive-crash counter.
+- At **2** consecutive mid-run reboots the breaker trips: `beginRun()` returns `false`, the
+  worker reports status `halted` and returns `failure()` — not `retry()`, since nothing may
+  re-arm it automatically.
+- Any orderly worker exit — success, failure, or retry — resets the counter to zero.
+  Tripping therefore requires *consecutive* device crashes (the boot-loop signature), not
+  one reboot a month from a dead battery.
+- Boot identity, not process identity: Wear kills the worker's process constantly without
+  rebooting, and that must never count.
+
+Only a **deliberate user action** re-arms downloads, via `resetBreaker()`:
+
+| Trigger | Call site |
+|---|---|
+| Opening the watch app | `MainActivity.onCreate`, before `onResume` enqueues |
+| Phone refresh button (`/podcatch/request-sync`) | `DataLayerListenerService` |
+| Phone long-press retry (`/podcatch/retry-watch-episode`) | `DataLayerListenerService` |
+
+The refused-run path writes no stamp, so a refusal can never be counted as a crash.
+
+### Free-space floor
+
+The worker refuses to take the watch's free storage below **500 MB**
+(`EpisodeDownloadWorker.MIN_FREE_BYTES`). The floor protects the *system*, not the download —
+Wear OS gets unstable, up to failing to boot, when `/data` runs out.
+
+Three checks, all with the same outcome:
+
+1. Before each episode: `dir.usableSpace < MIN_FREE_BYTES`
+2. Once the response reveals the real size: remaining bytes would not fit above the floor
+3. In the catch block: a write failed **and** free space is measured below the floor —
+   ENOSPC surfaces as a plain `IOException`, and the measurement avoids matching localised
+   messages
+
+On any of them the run stops with `success()` (like the no-network refusal — the queue is
+left intact, `retry()` plus `KEEP` is the K6 shape), sets a persisted out-of-space flag in
+`DownloadRunGuard`, and reports. The reporter maps the flag to status `no-space`. The flag
+clears itself on the next pass that finds room, so freeing space plus any normal trigger
+(app open, sync, list change) resumes the queue.
+
+This is **not** the phone-side storage limit (K20) — that caps what gets queued; this stops
+a queued download from destabilising the watch. A full disk is deliberately not `markError`:
+it is not the episode's fault, and freeing space should not require per-episode retries.
+
+### Retrying
 
 Downloading is automatic. The only manual download action is retrying a failure.
 
@@ -487,9 +557,15 @@ Per episode it derives:
 
 | Field | Rule |
 |---|---|
-| `status` | `complete` if `localPath != null`, else `error` if `error`, else `downloading` if `downloadProgress != 0`, else `waiting-wifi` if held by the Wi-Fi-only setting, else `pending` |
+| `status` | `complete` if `localPath != null`, else `error` if `error`, else `halted` if the crash-loop breaker is tripped, else `downloading` if `downloadProgress != 0`, else `no-space` if the last run stopped at the free-space floor, else `waiting-wifi` if held by the Wi-Fi-only setting, else `pending` |
 | `progress` | `100` if complete, `0` if error, else `max(downloadProgress, 0)` |
 | `sizeBytes` | `File(localPath).length()` when complete, else `0` |
+
+`halted` outranks `downloading` deliberately: a mid-download percentage is persisted, so it
+survives exactly the reboots that trip the breaker, and nothing is actually moving. Both
+`halted` and `no-space` are read from `DownloadRunGuard`'s persisted state, for the same
+cross-process reason as signal 2 below. The phone renders `halted` as
+"Paused after watch restarts — sync to retry" and `no-space` as "Watch storage full".
 
 `sizeBytes` is the only field that reports **measured** state rather than derived state. It is
 `0` for anything not yet downloaded, and `0` from watch builds predating the field. The phone
@@ -805,6 +881,47 @@ duplication).
 ## 10. Change log
 
 Newest first. Add an entry whenever sync behavior changes.
+
+### 2026-09-04 — crash-loop breaker and free-space floor
+
+Two new refusal paths in the download worker, both surfaced to the phone. **Contract
+change: two new `status` values (`halted`, `no-space`) on
+`/podcatch/watch-download-status`.** A phone build predating them shows the raw strings'
+absence as no status row; the paths and payload shape are unchanged, so the three mirrored
+contract files needed only a comment update in `datalayer.ts`.
+
+Prompted by a field report: a watch entered a boot loop on first open of the app, with no
+window to uninstall. The suspected trigger is a Wi-Fi firmware panic during
+`HighBandwidthNetwork.acquire()`'s radio bring-up; whatever the trigger, WorkManager's
+`RescheduleReceiver` restarting pending work on `BOOT_COMPLETED` is what turns one crash
+into a self-sustaining loop.
+
+- New `DownloadRunGuard`. `beginRun()`/`endRun()` bracket the worker's network section with
+  a persisted boot-id stamp; a stamp surviving into a later boot counts as a mid-run device
+  crash. Two consecutive crashes trip the breaker: the worker reports `halted` and returns
+  `failure()` without touching the network.
+- Only deliberate user actions re-arm it: opening the watch app (`MainActivity.onCreate`),
+  the phone's refresh (`request-sync`), and the phone's per-episode retry
+  (`retry-watch-episode`).
+- `EpisodeDownloadWorker` now refuses to take free storage below 500 MB
+  (`MIN_FREE_BYTES`): checked before each episode, re-checked against the response's real
+  size, and measured in the catch block so ENOSPC does not need message matching. The run
+  stops with `success()`, a persisted flag makes the reporter say `no-space`, and the flag
+  clears on the next pass with room. Not `markError` — a full disk is not the episode's
+  fault.
+- Reporter ordering: `halted` outranks `downloading` (persisted progress survives the
+  reboots that tripped it); `no-space` sits between `downloading` and `waiting-wifi`.
+- Phone: `WatchEpisodeStatus.status` union gains the two values; the watch tab renders
+  "Paused after watch restarts — sync to retry" and "Watch storage full" in the error color.
+- The worker now verifies eligibility itself before touching the network: with no
+  undownloaded, un-errored audio and no missing artwork it returns `success()` without
+  acquiring Wi-Fi or arming the breaker. Previously a non-empty but fully-downloaded list —
+  work replayed after a reboot, or a list of only errored episodes (the listener-service
+  filter does not exclude `error`) — brought Wi-Fi up for nothing.
+
+Verified: not yet — needs both apps rebuilt. The breaker's crash path also cannot be
+exercised on an emulator without inducing a mid-run reboot (e.g. `adb reboot` during a
+download, twice).
 
 ### 2026-08-07 — Up Next, on the watch only
 

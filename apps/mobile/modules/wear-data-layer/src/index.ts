@@ -10,8 +10,22 @@ export interface WatchEpisodeStatus {
   /**
    * `waiting-wifi` means the watch has the episode queued but is holding off because
    * Wi-Fi-only downloads are enabled and it is not on an unmetered network.
+   *
+   * `halted` means the watch's crash-loop breaker tripped: two consecutive download
+   * runs each ended in a device reboot, so downloads are suspended until a deliberate
+   * user action — opening the watch app, or sync/retry from this phone.
+   *
+   * `no-space` means the watch stopped downloading to keep free storage above its
+   * floor. Freeing space on the watch and syncing resumes the queue.
    */
-  status: "pending" | "downloading" | "complete" | "error" | "waiting-wifi";
+  status:
+    | "pending"
+    | "downloading"
+    | "complete"
+    | "error"
+    | "waiting-wifi"
+    | "halted"
+    | "no-space";
   progress: number;
   /**
    * Measured size of the file on the watch, in bytes. 0 means unknown — either the
